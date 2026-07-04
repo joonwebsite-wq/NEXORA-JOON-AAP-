@@ -31,6 +31,7 @@ export interface Service {
 
 export interface Shop {
   id: string;
+  owner_id?: string;
   shop_name: string;
   category: string;
   description: string;

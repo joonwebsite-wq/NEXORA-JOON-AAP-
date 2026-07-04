@@ -39,6 +39,7 @@ import OwnerRegister from "./components/owner/OwnerRegister";
 import OwnerDashboardPlaceholder from "./components/owner/OwnerDashboardPlaceholder";
 import OwnerCreateWebsite from "./components/owner/OwnerCreateWebsite";
 import PublicShopWebsite from "./components/owner/PublicShopWebsite";
+import SuperAdminDashboard from "./components/admin/SuperAdminDashboard";
 import LoadingState from "./components/customer/LoadingState";
 import { supabase } from "./lib/supabase";
 import { Salon, Service } from "./types";
@@ -388,6 +389,22 @@ export default function App() {
       const slug = parts[2];
       return <PublicShopWebsite slug={slug} navigateTo={navigateTo} />;
     }
+  }
+
+  if (currentPath === "/admin") {
+    if (authLoading) {
+      return (
+        <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center font-sans">
+          <div className="animate-spin rounded-full h-10 w-10 border-4 border-blue-600 border-t-transparent mb-4"></div>
+          <p className="text-sm text-slate-500 font-medium">Verifying Session...</p>
+        </div>
+      );
+    }
+    if (!session) {
+      navigateTo("/login");
+      return null;
+    }
+    return <SuperAdminDashboard navigateTo={navigateTo} />;
   }
 
   if (currentPath === "/owner-create-website") {

@@ -838,6 +838,35 @@ export default function OwnerCreateWebsite({ navigateTo }: OwnerCreateWebsitePro
             </div>
           </div>
 
+          {/* Nexora Payment QR - Read Only section */}
+          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+            <div>
+              <h3 className="text-sm font-black uppercase tracking-wider text-slate-400">4. Salon QR & Payment Gateway</h3>
+              <p className="text-2xs text-slate-400 mt-0.5">Configure how customers make payments at your salon.</p>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/60 space-y-3">
+              <div className="flex gap-3">
+                <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                <div className="text-xs space-y-1">
+                  <span className="font-bold text-slate-900">Nexora SalonOS Payments Active</span>
+                  <p className="text-slate-500 font-light leading-relaxed">
+                    Your shop website will show Nexora SalonOS company QR after approval. Owner personal QR is not allowed. 
+                  </p>
+                </div>
+              </div>
+
+              <div className="border-t border-slate-200/80 pt-3 text-[10px] text-slate-400">
+                <span className="font-bold text-slate-500 uppercase block mb-1">Company QR Policy Checklist</span>
+                <ul className="list-disc list-inside space-y-1">
+                  <li>Owner cannot upload or configure any personal QR codes.</li>
+                  <li>All payments are securely processed and verified by Nexora.</li>
+                  <li>Payments are credited to your owner wallet minus the 10% platform commission.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
           {/* Action buttons */}
           <div className="flex justify-end gap-3">
             <button

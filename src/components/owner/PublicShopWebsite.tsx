@@ -12,7 +12,8 @@ import {
   Mail, 
   Compass, 
   Sparkles,
-  Calendar
+  Calendar,
+  QrCode
 } from "lucide-react";
 
 interface PublicShopWebsiteProps {
@@ -24,10 +25,26 @@ interface PublicShopWebsiteProps {
 export default function PublicShopWebsite({ slug, previewData, navigateTo }: PublicShopWebsiteProps) {
   const [shop, setShop] = useState<any>(previewData || null);
   const [services, setServices] = useState<any[]>([]);
-  const [loading, setLoading] = useState(!previewData);
+  const [qrSettings, setQrSettings] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    async function fetchPlatformQr() {
+      try {
+        const { data: qrData } = await supabase
+          .from("platform_qr_settings")
+          .select("*")
+          .eq("is_active", true)
+          .maybeSingle();
+        if (qrData) {
+          setQrSettings(qrData);
+        }
+      } catch (err) {
+        console.error("Error fetching platform QR in public page:", err);
+      }
+    }
+
     if (previewData) {
       setShop(previewData);
       setServices(previewData.services || [
@@ -35,6 +52,7 @@ export default function PublicShopWebsite({ slug, previewData, navigateTo }: Pub
         { id: "2", service_name: "Hydra Facial Luxe", category: "Skin", price: 1999, duration_minutes: 60 },
         { id: "3", service_name: "Beard Sculpture", category: "Beard", price: 299, duration_minutes: 20 }
       ]);
+      fetchPlatformQr();
       setLoading(false);
       return;
     }
@@ -76,6 +94,16 @@ export default function PublicShopWebsite({ slug, previewData, navigateTo }: Pub
           console.warn("Could not load services:", servicesError);
         } else {
           setServices(servicesData || []);
+        }
+
+        // Fetch active platform QR
+        const { data: qrData } = await supabase
+          .from("platform_qr_settings")
+          .select("*")
+          .eq("is_active", true)
+          .maybeSingle();
+        if (qrData) {
+          setQrSettings(qrData);
         }
       } catch (err) {
         console.error("Unexpected error:", err);
@@ -357,6 +385,47 @@ export default function PublicShopWebsite({ slug, previewData, navigateTo }: Pub
                   <img src={url} alt={`gallery-${idx}`} referrerPolicy="no-referrer" className="w-full h-full object-cover hover:scale-105 transition duration-350" />
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Payment Section - Pay with Nexora SalonOS QR */}
+        {qrSettings && (
+          <div className={`p-6 rounded-3xl shadow-sm border ${styles.border} ${styles.cardBg} space-y-4`}>
+            <div className="flex items-center gap-2">
+              <QrCode className={`w-5 h-5 ${styles.accentText}`} />
+              <h3 className="text-sm font-black uppercase tracking-wider text-slate-400">Pay with Nexora SalonOS QR</h3>
+            </div>
+            
+            <div className={`flex flex-col md:flex-row gap-6 items-center p-4 rounded-2xl border ${styles.border} bg-slate-50/10`}>
+              {qrSettings.qr_image_url ? (
+                <div className="w-36 h-36 bg-white p-2 rounded-xl border border-slate-200 flex items-center justify-center overflow-hidden flex-shrink-0">
+                  <img 
+                    src={qrSettings.qr_image_url} 
+                    alt="Nexora Company QR" 
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-contain"
+                  />
+                </div>
+              ) : (
+                <div className="w-36 h-36 bg-white rounded-xl border border-slate-200 flex flex-col items-center justify-center p-4 flex-shrink-0">
+                  <QrCode className="w-8 h-8 text-slate-400 mb-1" />
+                  <span className="text-[10px] text-slate-400 font-bold">QR Loading</span>
+                </div>
+              )}
+              
+              <div className="space-y-2 flex-1 text-center md:text-left">
+                <span className={`text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-full border ${styles.badge}`}>
+                  Verified Platform Payment
+                </span>
+                <p className={`text-xs ${styles.textMuted} leading-relaxed`}>
+                  Pay securely at the shop using Nexora SalonOS company QR.
+                </p>
+                <div className={`space-y-1 font-mono text-3xs ${styles.textMuted}`}>
+                  {qrSettings.payee_name && <p>Payee: <span className="font-bold">{qrSettings.payee_name}</span></p>}
+                  {qrSettings.upi_id && <p>UPI ID: <span className="font-bold">{qrSettings.upi_id}</span></p>}
+                </div>
+              </div>
             </div>
           </div>
         )}
