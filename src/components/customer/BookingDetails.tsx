@@ -224,6 +224,76 @@ const BookingDetails = ({ navigateTo, bookingId }: BookingDetailsProps) => {
     }
   };
 
+  const handlePayNow = async () => {
+    if (!booking) return;
+    setIsPaying(true);
+    setMessage(null);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Unauthorized");
+
+      // 1. Create order
+      const response = await fetch("/api/razorpay/create-order", {
+        method: "POST",
+        headers: { 
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({ booking_id: booking.id }),
+      });
+      const order = await response.json();
+      if (!order.order_id) throw new Error("Failed to create order");
+
+      // 2. Open checkout
+      const options = {
+        key: order.key_id,
+        amount: booking.total_amount * 100,
+        currency: "INR",
+        name: "Nexora",
+        description: "Booking Payment",
+        order_id: order.order_id,
+        handler: async (response: any) => {
+          // 3. Verify
+          const verifyRes = await fetch("/api/razorpay/verify-payment", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+            }),
+          });
+          if (verifyRes.ok) {
+            setMessage({ type: 'success', text: "Payment verified successfully." });
+          } else {
+            setMessage({ type: 'error', text: "Payment verification failed." });
+          }
+        },
+        prefill: {
+          email: session.user.email,
+        },
+      };
+      
+      // @ts-ignore
+      const razorpay = new window.Razorpay(options);
+      razorpay.open();
+
+    } catch (err: any) {
+      console.error(err);
+      setMessage({ type: 'error', text: "Payment initiation failed." });
+    } finally {
+      setIsPaying(false);
+    }
+  };
+
+  useEffect(() => {
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.async = true;
+    document.body.appendChild(script);
+  }, []);
+
   if (loading) return <LoadingState />;
 
   if (error || !booking) {
@@ -434,15 +504,26 @@ const BookingDetails = ({ navigateTo, bookingId }: BookingDetailsProps) => {
           </div>
         )}
 
-        {/* Actions */}
-        {(booking.status === 'pending' || booking.status === 'confirmed') && (
-            <div className="grid grid-cols-2 gap-4 pt-4">
+        {/* Payment Section */}
+        {(booking.status === 'pending' || booking.status === 'confirmed') && booking.payment_status !== 'paid' && (
+            <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-sm space-y-4">
+                <h4 className="font-bold text-slate-900 text-sm">Pay Online</h4>
+                <p className="text-xs text-slate-500">Secure payment via Razorpay. Nexora automatically handles commission and owner payout.</p>
                 <button
-                  className="col-span-2 flex items-center justify-center gap-2 py-4 px-6 bg-blue-600 text-white font-bold rounded-2xl text-sm shadow-xl shadow-blue-100 hover:bg-blue-700 transition"
-                  onClick={() => {/* TODO: Implement Razorpay checkout */}}
+                  className="w-full flex items-center justify-center gap-2 py-4 px-6 bg-blue-600 text-white font-bold rounded-2xl text-sm shadow-xl shadow-blue-100 hover:bg-blue-700 transition"
+                  onClick={handlePayNow}
+                  disabled={isPaying}
                 >
-                    Pay Now
+                    {isPaying ? "Processing..." : "Pay Now"}
                 </button>
+                {booking.payment_status === 'order_created' && (
+                    <p className="text-xs text-amber-600 font-bold text-center">Payment verification in progress.</p>
+                )}
+            </div>
+        )}
+
+        {/* Actions */}
+        <div className="grid grid-cols-2 gap-4 pt-4">
                 {new Date(`${booking.booking_date}T${booking.booking_time}`).getTime() > new Date().getTime() && (
                     <button 
                       onClick={handleShare}
@@ -464,8 +545,7 @@ const BookingDetails = ({ navigateTo, bookingId }: BookingDetailsProps) => {
                 >
                     <XCircle className="w-4 h-4" /> {cancelling ? "Cancelling..." : "Cancel Booking"}
                 </button>
-            </div>
-        )}
+        </div>
 
         {(booking.status === 'completed' || booking.status === 'cancelled' || booking.status === 'no_show') && (
             <div className="space-y-4 pt-4">

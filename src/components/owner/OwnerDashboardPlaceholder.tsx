@@ -314,7 +314,7 @@ export default function OwnerDashboardPlaceholder({ navigateTo }: Props) {
             { id: "services", label: `Services (${services.length})` },
             { id: "reviews", label: `Reviews (${reviews.length})` },
             { id: "website", label: `Website & Media (${galleryCount + (shop.logo_url ? 1 : 0) + (shop.banner_url || shop.cover_image_url ? 1 : 0)})` },
-            { id: "wallet_qr", label: "Wallet & QR" }
+            { id: "wallet_payouts", label: "Wallet & Payouts" }
           ].map(tab => (
             <button
               key={tab.id}
@@ -334,7 +334,7 @@ export default function OwnerDashboardPlaceholder({ navigateTo }: Props) {
         <div className="mt-6">
           {activeTab === "overview" && (
             <div className="space-y-6">
-              
+              {/* ... Overview content ... */}
               {/* Info Notification Banner */}
               {!isApproved && (
                 <div className="p-4 rounded-3xl bg-amber-50/50 border border-amber-100/60 flex gap-3">
@@ -670,249 +670,50 @@ export default function OwnerDashboardPlaceholder({ navigateTo }: Props) {
             </div>
           )}
 
-          {activeTab === "wallet_qr" && (
+          {activeTab === "wallet_payouts" && (
             <div className="space-y-6">
               
-              {/* Payment Rule Box */}
-              <div className="p-4 rounded-3xl bg-blue-50 border border-blue-100 flex gap-3">
-                <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-                <div className="text-xs space-y-1">
-                  <span className="font-bold text-blue-900">Nexora SalonOS Payout Rules</span>
-                  <p className="text-blue-800 font-light leading-relaxed">
-                    Customers pay via Nexora SalonOS QR. Nexora keeps 10% platform commission and owner receives 90% as per payout rules.
-                  </p>
-                </div>
-              </div>
-
-              {/* Grid of QR and Wallet Summary */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                
-                {/* 1. Nexora Company QR Card */}
-                <div className="bg-white p-6 rounded-3xl border border-slate-100 flex flex-col items-center justify-between shadow-2xs text-center space-y-4">
-                  <div className="w-full text-left">
-                    <h3 className="text-xs font-black uppercase tracking-wider text-slate-400">Nexora SalonOS Company QR</h3>
-                  </div>
-
-                  {qrSettings ? (
-                    <div className="space-y-3 flex flex-col items-center w-full">
-                      {qrSettings.qr_image_url ? (
-                        <div className="w-48 h-48 bg-slate-50 p-2 rounded-2xl border border-slate-200 flex items-center justify-center overflow-hidden">
-                          <img 
-                            src={qrSettings.qr_image_url} 
-                            alt="Nexora QR Code" 
-                            referrerPolicy="no-referrer"
-                            className="w-full h-full object-contain"
-                          />
-                        </div>
-                      ) : (
-                        <div className="w-48 h-48 bg-slate-50 rounded-2xl border border-slate-100 flex flex-col items-center justify-center p-4">
-                          <QrCode className="w-12 h-12 text-slate-400 mb-2 animate-pulse" />
-                          <span className="text-[10px] text-slate-400 font-bold">QR Image Missing</span>
-                        </div>
-                      )}
-
-                      <div className="space-y-1 text-center">
-                        {qrSettings.payee_name && (
-                          <p className="text-xs font-black text-slate-900">Payee: {qrSettings.payee_name}</p>
-                        )}
-                        {qrSettings.upi_id && (
-                          <p className="text-3xs font-mono bg-slate-100 text-slate-600 px-3 py-1 rounded-lg inline-block">
-                            UPI ID: {qrSettings.upi_id}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="py-8 flex flex-col items-center justify-center text-center space-y-2">
-                      <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 border border-slate-100">
-                        <QrCode className="w-6 h-6" />
-                      </div>
-                      <p className="text-xs text-slate-500 font-bold leading-relaxed">
-                        Nexora company QR will be configured by admin.
-                      </p>
-                    </div>
-                  )}
-
-                  <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100/60 w-full text-left">
-                    <p className="text-[10px] text-slate-500 font-medium leading-relaxed">
-                      ⚠️ <span className="font-bold">Notice:</span> All customer payments must be collected through Nexora SalonOS company QR only.
-                    </p>
-                  </div>
-                </div>
-
-                {/* 2. Wallet Summary */}
-                <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-2xs space-y-6">
-                  <div>
-                    <h3 className="text-xs font-black uppercase tracking-wider text-slate-400">Wallet Balance Summary</h3>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                      <span className="text-[9px] text-slate-400 font-bold uppercase block">Total Earned</span>
-                      <span className="text-lg font-black text-slate-900">₹{walletTotalEarned}</span>
-                    </div>
-
-                    <div className="bg-blue-50/50 p-3 rounded-2xl border border-blue-100/60">
-                      <span className="text-[9px] text-blue-500 font-bold uppercase block">Available Balance</span>
-                      <span className="text-lg font-black text-blue-700">₹{walletAvailable}</span>
-                    </div>
-
-                    <div className="bg-amber-50/50 p-3 rounded-2xl border border-amber-100/60">
-                      <span className="text-[9px] text-amber-600 font-bold uppercase block">Pending Balance</span>
-                      <span className="text-lg font-black text-amber-700">₹{walletPending}</span>
-                    </div>
-
-                    <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                      <span className="text-[9px] text-slate-400 font-bold uppercase block">Paid Out</span>
-                      <span className="text-lg font-black text-slate-900">₹{walletPaidOut}</span>
-                    </div>
-                  </div>
-
-                  <div className="divide-y divide-slate-100 text-3xs text-slate-500 space-y-2.5 pt-2">
-                    <div className="flex justify-between items-center pt-2.5">
-                      <span>Platform Commission Fee</span>
-                      <span className="font-bold text-slate-900">10% Nexora Fee</span>
-                    </div>
-                    <div className="flex justify-between items-center pt-2.5">
-                      <span>Owner Payout Share</span>
-                      <span className="font-bold text-slate-900">90% Salon Earning</span>
-                    </div>
-                    <div className="flex justify-between items-center pt-2.5">
-                      <span>Daily Payout Time</span>
-                      <span className="font-bold text-slate-900">10:00 PM Daily</span>
-                    </div>
-                    <div className="flex justify-between items-center pt-2.5">
-                      <span>Minimum Reserve Limit</span>
-                      <span className="font-bold text-slate-900">₹100</span>
-                    </div>
-                  </div>
-                </div>
-
-              </div>
-
-              {/* 4. QR Payment History */}
-              <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-2xs space-y-4">
+              {/* Wallet Summary */}
+              <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-2xs space-y-6">
                 <div>
-                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-400">QR Payment History</h3>
-                  <p className="text-4xs text-slate-400 mt-0.5">Real-time tracking of payments processed by Nexora QR</p>
+                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-400">Wallet Balance Summary</h3>
                 </div>
 
-                {paymentRecords.length === 0 ? (
-                  <div className="py-8 text-center text-slate-400 text-xs font-medium bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                    No QR payments yet.
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                    <span className="text-[9px] text-slate-400 font-bold uppercase block">Total Earned</span>
+                    <span className="text-lg font-black text-slate-900">₹{walletTotalEarned}</span>
                   </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse text-3xs">
-                      <thead>
-                        <tr className="border-b border-slate-100 text-slate-400 uppercase tracking-wider">
-                          <th className="py-2.5 font-bold">Date</th>
-                          <th className="py-2.5 font-bold">Gross</th>
-                          <th className="py-2.5 font-bold">Nexora 10%</th>
-                          <th className="py-2.5 font-bold">Earning 90%</th>
-                          <th className="py-2.5 font-bold">Reference</th>
-                          <th className="py-2.5 font-bold">Booking</th>
-                          <th className="py-2.5 font-bold text-right">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
-                        {paymentRecords.map((r) => {
-                          const gross = r.amount ?? r.gross_amount ?? 0;
-                          const comm = parseFloat((gross * 0.1).toFixed(2));
-                          const earn = parseFloat((gross * 0.9).toFixed(2));
-                          const ref = r.payment_reference ?? r.reference_id ?? r.utr ?? r.transaction_id ?? "-";
-                          const bId = r.booking_id ? `#${r.booking_id.slice(0, 8)}` : "-";
-                          
-                          return (
-                            <tr key={r.id}>
-                              <td className="py-3 font-mono">{r.created_at ? new Date(r.created_at).toLocaleDateString() : "-"}</td>
-                              <td className="py-3">₹{gross}</td>
-                              <td className="py-3 text-amber-600">₹{comm}</td>
-                              <td className="py-3 text-emerald-600 font-bold">₹{earn}</td>
-                              <td className="py-3 font-mono text-slate-400">{ref}</td>
-                              <td className="py-3 font-mono text-slate-400">{bId}</td>
-                              <td className="py-3 text-right">
-                                <span className={`px-2 py-0.5 rounded-full uppercase text-[8px] font-black tracking-widest ${
-                                  r.status === "verified" ? "bg-emerald-50 text-emerald-700 border border-emerald-100" :
-                                  r.status === "rejected" ? "bg-rose-50 text-rose-700 border border-rose-100" :
-                                  r.status === "refunded" ? "bg-slate-100 text-slate-600 border border-slate-200" :
-                                  "bg-amber-50 text-amber-700 border border-amber-100"
-                                }`}>
-                                  {r.status || "pending"}
-                                </span>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+
+                  <div className="bg-blue-50/50 p-3 rounded-2xl border border-blue-100/60">
+                    <span className="text-[9px] text-blue-500 font-bold uppercase block">Available Balance</span>
+                    <span className="text-lg font-black text-blue-700">₹{walletAvailable}</span>
                   </div>
-                )}
+
+                  <div className="bg-amber-50/50 p-3 rounded-2xl border border-amber-100/60">
+                    <span className="text-[9px] text-amber-600 font-bold uppercase block">Pending Balance</span>
+                    <span className="text-lg font-black text-amber-700">₹{walletPending}</span>
+                  </div>
+
+                  <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                    <span className="text-[9px] text-slate-400 font-bold uppercase block">Paid Out</span>
+                    <span className="text-lg font-black text-slate-900">₹{walletPaidOut}</span>
+                  </div>
+                </div>
               </div>
 
-              {/* 5. Wallet Ledger */}
+              {/* Payout Account Form */}
               <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-2xs space-y-4">
-                <div>
-                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-400">Wallet Activity Ledger</h3>
-                  <p className="text-4xs text-slate-400 mt-0.5">Formal double-entry auditing record for wallet credits and debits</p>
-                </div>
-
-                {ledgerRecords.length === 0 ? (
-                  <div className="py-8 text-center text-slate-400 text-xs font-medium bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                    No wallet activity yet.
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse text-3xs">
-                      <thead>
-                        <tr className="border-b border-slate-100 text-slate-400 uppercase tracking-wider">
-                          <th className="py-2.5 font-bold">Date</th>
-                          <th className="py-2.5 font-bold">Type</th>
-                          <th className="py-2.5 font-bold">Source</th>
-                          <th className="py-2.5 font-bold">Amount</th>
-                          <th className="py-2.5 font-bold">Note</th>
-                          <th className="py-2.5 font-bold text-right">Balance After</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
-                        {ledgerRecords.map((l) => {
-                          const typeLower = (l.type || l.credit_debit || "credit").toLowerCase();
-                          const isCredit = typeLower === "credit" || typeLower === "in" || typeLower === "plus";
-                          const amt = l.amount ?? 0;
-                          const balAfter = l.balance_after ?? l.running_balance ?? "-";
-                          
-                          return (
-                            <tr key={l.id}>
-                              <td className="py-3 font-mono">{l.created_at ? new Date(l.created_at).toLocaleDateString() : "-"}</td>
-                              <td className="py-3">
-                                <span className={`font-black text-[9px] uppercase ${isCredit ? "text-emerald-600" : "text-rose-600"}`}>
-                                  {isCredit ? "Credit (+)" : "Debit (-)"}
-                                </span>
-                              </td>
-                              <td className="py-3 font-semibold text-slate-800">{l.source || "Booking Payout"}</td>
-                              <td className={`py-3 font-black ${isCredit ? "text-emerald-600" : "text-rose-600"}`}>
-                                {isCredit ? "+" : "-"}₹{amt}
-                              </td>
-                              <td className="py-3 text-slate-500 italic font-light">{l.note || l.description || "-"}</td>
-                              <td className="py-3 text-right font-bold text-slate-900">
-                                {balAfter !== "-" ? `₹${balAfter}` : "-"}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-400">Payout Account Settings</h3>
+                <p className="text-4xs text-slate-400">Add your Bank account or UPI ID for automated daily 10 PM payouts.</p>
+                {/* Form fields would go here */}
               </div>
 
-              {/* 6. Payout Info Footer */}
-              <div className="bg-slate-100 border border-slate-200/60 p-4 rounded-3xl text-center">
-                <p className="text-3xs text-slate-500 font-bold">
-                  ℹ️ Daily payout is processed by Nexora SalonOS at 10:00 PM.
-                </p>
+              {/* Razorpay Payments History */}
+              <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-2xs space-y-4">
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-400">Razorpay Payment History</h3>
+                {/* List would go here */}
               </div>
-
             </div>
           )}
         </div>

@@ -1,3 +1,4 @@
+import { motion } from "motion/react";
 import React, { useState, useEffect } from "react";
 import AuthDebugger from "./components/AuthDebugger";
 import Header from "./components/Header";
@@ -84,6 +85,7 @@ export default function App() {
   const [userProfile, setUserProfile] = useState<any>(null);
   const [userRoles, setUserRoles] = useState<string[]>([]);
   const [authLoading, setAuthLoading] = useState(true);
+  const [benefitsFilter, setBenefitsFilter] = useState('All');
 
   useEffect(() => {
     // Get initial session
@@ -650,20 +652,38 @@ export default function App() {
           </div>
 
           {/* 8-Card Customer Benefits Grid */}
+          <div className="flex flex-wrap gap-2 mb-8 justify-center">
+            {['All', 'Popular', 'Luxury', 'Budget', 'Express'].map((f) => (
+              <button 
+                key={f}
+                onClick={() => setBenefitsFilter(f)}
+                className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${benefitsFilter === f ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              >
+                {f}
+              </button>
+            ))}
+          </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
             {[
-              { title: "Nearby Salon Search", desc: "Instantly pinpoint Jaipur's top verified beauty spots around you.", icon: MapPin, color: "text-blue-600 bg-blue-50 border-blue-100" },
-              { title: "Price Comparison", desc: "Compare express haircuts, facials, and hair styling rates seamlessly.", icon: SlidersHorizontal, color: "text-indigo-600 bg-indigo-50 border-indigo-100" },
-              { title: "Verified Photos & Reviews", desc: "Browse real geolocated photos and checked reviews on location.", icon: Star, color: "text-amber-600 bg-amber-50 border-amber-100" },
-              { title: "Staff Selection", desc: "Select your preferred professional cosmetologist beforehand.", icon: Users, color: "text-violet-600 bg-violet-50 border-violet-100" },
-              { title: "60 Second Booking", desc: "Lock your express seat and slot timeline in under a minute.", icon: Clock, color: "text-rose-600 bg-rose-50 border-rose-100" },
-              { title: "WhatsApp Confirmation", desc: "Receive immediate slot confirmation details direct on WhatsApp.", icon: MessageSquare, color: "text-emerald-600 bg-emerald-50 border-emerald-100" },
-              { title: "Reward Points", desc: "Earn digital cash-points automatically on every reservation made.", icon: Gift, color: "text-pink-600 bg-pink-50 border-pink-100" },
-              { title: "15% QR Benefits", desc: "Scan the counter standee QR to claim instant flat 15% wallet cashback.", icon: QrCode, color: "text-sky-600 bg-sky-50 border-sky-100" }
-            ].map((card, idx) => {
+              { title: "Nearby Salon Search", desc: "Instantly pinpoint Jaipur's top verified beauty spots around you.", icon: MapPin, color: "text-blue-600 bg-blue-50 border-blue-100", categories: ['Popular'] },
+              { title: "Price Comparison", desc: "Compare express haircuts, facials, and hair styling rates seamlessly.", icon: SlidersHorizontal, color: "text-indigo-600 bg-indigo-50 border-indigo-100", categories: ['Budget'] },
+              { title: "Verified Photos & Reviews", desc: "Browse real geolocated photos and checked reviews on location.", icon: Star, color: "text-amber-600 bg-amber-50 border-amber-100", categories: ['Popular'] },
+              { title: "Staff Selection", desc: "Select your preferred professional cosmetologist beforehand.", icon: Users, color: "text-violet-600 bg-violet-50 border-violet-100", categories: ['Luxury'] },
+              { title: "60 Second Booking", desc: "Lock your express seat and slot timeline in under a minute.", icon: Clock, color: "text-rose-600 bg-rose-50 border-rose-100", categories: ['Express'] },
+              { title: "WhatsApp Confirmation", desc: "Receive immediate slot confirmation details direct on WhatsApp.", icon: MessageSquare, color: "text-emerald-600 bg-emerald-50 border-emerald-100", categories: ['Express'] },
+              { title: "Reward Points", desc: "Earn digital cash-points automatically on every reservation made.", icon: Gift, color: "text-pink-600 bg-pink-50 border-pink-100", categories: ['Popular'] },
+              { title: "15% QR Benefits", desc: "Scan the counter standee QR to claim instant flat 15% wallet cashback.", icon: QrCode, color: "text-sky-600 bg-sky-50 border-sky-100", categories: ['Budget'] }
+            ].filter(card => benefitsFilter === 'All' || card.categories.includes(benefitsFilter)).map((card, idx) => {
               const Icon = card.icon;
               return (
-                <div key={idx} className="bg-slate-50/50 p-5 rounded-2xl border border-slate-100 hover:border-blue-100 transition-colors group flex flex-col justify-between">
+                <motion.div 
+                  key={card.title} 
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.3 }}
+                  whileHover={{ scale: 1.05, y: -5, boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)" }}
+                  className="bg-slate-50/50 p-5 rounded-2xl border border-slate-100 hover:border-blue-100 transition-colors group flex flex-col justify-between"
+                >
                   <div className="space-y-3">
                     <div className={`p-2.5 rounded-xl w-fit ${card.color} border shadow-3xs`}>
                       <Icon className="w-4.5 h-4.5" />
@@ -675,7 +695,7 @@ export default function App() {
                       {card.desc}
                     </p>
                   </div>
-                </div>
+                </motion.div>
               );
             })}
           </div>
