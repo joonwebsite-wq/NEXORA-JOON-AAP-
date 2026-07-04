@@ -106,7 +106,9 @@ const isShopMatchKeyword = (
 const CustomerHome = ({ navigateTo }: CustomerHomeProps) => {
   const [profile, setProfile] = useState<any>(null);
   const [shops, setShops] = useState<Shop[]>([]);
-  const [shopServices, setShopServices] = useState<Record<string, { service_name: string; category: string }[]>>({});
+  const [shopServices, setShopServices] = useState<Record<string, { service_name: string; category: string; price: number; duration: number; }[]>>({});
+  const [aiRecommendations, setAiRecommendations] = useState<{service_name: string; category: string; price: number; duration: number; count: number}[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
@@ -235,21 +237,27 @@ const CustomerHome = ({ navigateTo }: CustomerHomeProps) => {
         }
 
         // 3. Fetch Shop Services
-        let servicesMap: Record<string, { service_name: string; category: string }[]> = {};
+        let servicesMap: Record<string, { service_name: string; category: string; price: number; duration: number; }[]> = {};
+        let allAvailableServices: { service_name: string; category: string; price: number; duration: number; shop_id: string }[] = [];
+        
         try {
           const { data: sData } = await supabase
             .from("shop_services")
-            .select("shop_id, service_name, category")
+            .select("shop_id, service_name, category, price, duration_minutes")
             .eq("is_active", true);
           if (sData) {
             sData.forEach((srv: any) => {
               if (!servicesMap[srv.shop_id]) {
                 servicesMap[srv.shop_id] = [];
               }
-              servicesMap[srv.shop_id].push({
+              const serviceData = {
                 service_name: srv.service_name || "",
-                category: srv.category || ""
-              });
+                category: srv.category || "",
+                price: srv.price || 0,
+                duration: srv.duration_minutes || 0
+              };
+              servicesMap[srv.shop_id].push(serviceData);
+              allAvailableServices.push({ ...serviceData, shop_id: srv.shop_id });
             });
           }
         } catch (serviceErr) {
@@ -275,6 +283,79 @@ const CustomerHome = ({ navigateTo }: CustomerHomeProps) => {
         } catch (trendErr) {
           console.error("Error fetching customer_trending_searches table:", trendErr);
           setRawTrendingKeywords(BASE_TRENDING_KEYWORDS);
+        }
+
+        // 5. AI Recommendations
+        if (user) {
+          const { data: pastBookings } = await supabase
+            .from("customer_bookings")
+            .select(`
+              shop_id,
+              status,
+              customer_booking_services ( service_name )
+            `)
+            .eq("customer_id", user.id)
+            .in("status", ["confirmed", "completed"]);
+
+          const serviceMap = new Map<string, {service_name: string; category: string; price: number; duration: number; count: number}>();
+          const usedCategories = new Set<string>();
+
+          if (pastBookings && pastBookings.length > 0) {
+            pastBookings.forEach((b: any) => {
+              if (b.customer_booking_services && Array.isArray(b.customer_booking_services)) {
+                b.customer_booking_services.forEach((s: any) => {
+                   const srvName = s.service_name;
+                   const srv = allAvailableServices.find(a => a.service_name === srvName);
+                   if (srv && srv.category) {
+                     usedCategories.add(srv.category);
+                   }
+                });
+              }
+            });
+
+            allAvailableServices.forEach(srv => {
+              if (usedCategories.has(srv.category)) {
+                if (!serviceMap.has(srv.service_name)) {
+                  serviceMap.set(srv.service_name, { service_name: srv.service_name, category: srv.category, price: srv.price, duration: srv.duration, count: 1 });
+                } else {
+                  serviceMap.get(srv.service_name)!.count++;
+                }
+              }
+            });
+          }
+
+          let finalTrendKeywords = BASE_TRENDING_KEYWORDS;
+          try {
+            const { data: trendData } = await supabase
+              .from("customer_trending_searches")
+              .select("keyword")
+              .eq("is_active", true)
+              .order("display_order", { ascending: true });
+            if (trendData && trendData.length > 0) {
+               finalTrendKeywords = Array.from(new Set([...trendData.map(t => t.keyword), ...BASE_TRENDING_KEYWORDS]));
+            }
+          } catch (e) {}
+
+          if (serviceMap.size < 6) {
+             for (const kw of finalTrendKeywords) {
+                const matches = allAvailableServices.filter(srv => 
+                   srv.service_name.toLowerCase().includes(kw.toLowerCase()) || 
+                   srv.category.toLowerCase().includes(kw.toLowerCase())
+                );
+                matches.forEach(srv => {
+                  if (!serviceMap.has(srv.service_name)) {
+                    serviceMap.set(srv.service_name, { service_name: srv.service_name, category: srv.category, price: srv.price, duration: srv.duration, count: 1 });
+                  } else {
+                    serviceMap.get(srv.service_name)!.count++;
+                  }
+                });
+             }
+          }
+
+          const recommendedServices = Array.from(serviceMap.values())
+             .sort((a, b) => b.count - a.count || a.price - b.price)
+             .slice(0, 6);
+          setAiRecommendations(recommendedServices);
         }
 
       } catch (err: any) {
@@ -727,6 +808,56 @@ const CustomerHome = ({ navigateTo }: CustomerHomeProps) => {
                     </button>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* AI-Recommended Services section */}
+          {aiRecommendations.length > 0 && (
+            <div className="pt-5 px-1 -mx-6 md:mx-0">
+              <div className="flex items-center gap-1.5 pl-6 md:pl-0 mb-1">
+                <Sparkles className="w-4 h-4 text-purple-600" />
+                <span className="text-xs font-bold text-slate-900 uppercase tracking-wider">AI-Recommended Services</span>
+              </div>
+              <p className="text-xs text-slate-500 pl-6 md:pl-0 mb-3">
+                {quickRebooks.length > 0 ? "Smart picks based on your bookings and trending services." : "Popular services customers are booking right now."}
+              </p>
+              <div className="flex gap-3 overflow-x-auto pb-4 px-6 md:px-0 no-scrollbar">
+                {aiRecommendations.map((item, idx) => {
+                   const matchingShop = shops.find(s => {
+                      const shopServicesList = shopServices[s.id] || [];
+                      return shopServicesList.some(srv => srv.service_name === item.service_name);
+                   });
+
+                   return (
+                  <div key={idx} className="bg-gradient-to-br from-purple-50 to-white p-4 rounded-2xl border border-purple-100 shadow-sm min-w-[220px] max-w-[220px] shrink-0 flex flex-col justify-between">
+                    <div className="mb-4">
+                      <div className="flex justify-between items-start mb-1">
+                         <h4 className="font-bold text-slate-900 text-sm line-clamp-2 pr-2">{item.service_name}</h4>
+                      </div>
+                      <p className="text-[10px] text-slate-500 font-medium truncate uppercase tracking-wider mb-2">{CATEGORY_LABELS[item.category] || item.category}</p>
+                      <div className="flex items-center gap-3 text-xs font-semibold text-slate-700">
+                        <span>₹{item.price}</span>
+                        <span className="text-slate-300">•</span>
+                        <span>{item.duration} mins</span>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => {
+                        if (matchingShop) {
+                          setSearchQuery(item.service_name);
+                          setSelectedCategory(null);
+                          setSelectedAudience(null);
+                          setSelectedFilter(null);
+                          saveRecentSearch(item.service_name);
+                        }
+                      }}
+                      className="w-full py-2 bg-purple-600 text-white rounded-xl text-xs font-bold hover:bg-purple-700 transition-colors cursor-pointer"
+                    >
+                      Book Now
+                    </button>
+                  </div>
+                )})}
               </div>
             </div>
           )}

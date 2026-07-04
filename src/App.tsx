@@ -35,6 +35,10 @@ import Support from "./components/customer/Support";
 import Privacy from "./components/customer/Privacy";
 import SettingsPage from "./components/customer/Settings";
 import UserNotifications from "./components/customer/Notifications";
+import OwnerRegister from "./components/owner/OwnerRegister";
+import OwnerDashboardPlaceholder from "./components/owner/OwnerDashboardPlaceholder";
+import OwnerCreateWebsite from "./components/owner/OwnerCreateWebsite";
+import PublicShopWebsite from "./components/owner/PublicShopWebsite";
 import LoadingState from "./components/customer/LoadingState";
 import { supabase } from "./lib/supabase";
 import { Salon, Service } from "./types";
@@ -77,6 +81,7 @@ export default function App() {
   const [currentPath, setCurrentPath] = useState(window.location.pathname);
   const [session, setSession] = useState<any>(null);
   const [userProfile, setUserProfile] = useState<any>(null);
+  const [userRoles, setUserRoles] = useState<string[]>([]);
   const [authLoading, setAuthLoading] = useState(true);
 
   useEffect(() => {
@@ -84,7 +89,7 @@ export default function App() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session) {
-        fetchProfile(session.user.id);
+        fetchProfileAndRoles(session.user.id);
       } else {
         setAuthLoading(false);
       }
@@ -94,9 +99,10 @@ export default function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       if (session) {
-        fetchProfile(session.user.id);
+        fetchProfileAndRoles(session.user.id);
       } else {
         setUserProfile(null);
+        setUserRoles([]);
         setAuthLoading(false);
       }
     });
@@ -104,17 +110,43 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const fetchProfile = async (userId: string) => {
+  const fetchProfileAndRoles = async (userId: string) => {
     try {
+      // 1. Fetch user profile
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .single();
       
-      if (data) setUserProfile(data);
+      if (data) {
+        setUserProfile(data);
+      }
+
+      // 2. Fetch user roles from user_roles table
+      const { data: rolesData } = await supabase
+        .from('user_roles')
+        .select('role')
+        .eq('user_id', userId);
+
+      let existingRoles = rolesData ? rolesData.map((r: any) => r.role) : [];
+
+      if (!existingRoles.includes('customer')) {
+        // Auto-provision role "customer" because they either have no roles, or have other roles (like shop_owner) but not customer.
+        const { error: insertError } = await supabase
+          .from('user_roles')
+          .insert({ user_id: userId, role: 'customer' });
+        
+        if (!insertError) {
+          existingRoles.push('customer');
+        } else {
+          console.error("Error auto-provisioning customer role:", insertError);
+        }
+      }
+
+      setUserRoles(existingRoles);
     } catch (err) {
-      console.error("Error fetching profile:", err);
+      console.error("Error fetching profile and roles:", err);
     } finally {
       setAuthLoading(false);
     }
@@ -312,26 +344,28 @@ export default function App() {
     return null;
   }
 
-  // Role Check
-  const blockedRoles = ["shop_owner", "growth_partner", "distributor", "super_admin"];
-  if (isCustomerRoute && session && userProfile && userProfile.role && blockedRoles.includes(userProfile.role)) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center font-sans">
-        <div className="max-w-md w-full bg-white p-8 rounded-3xl border border-slate-100 shadow-xl space-y-6">
-          <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center mx-auto border border-rose-100">
-            <LockIcon className="w-8 h-8" />
+  // Role Check for Customer Routes
+  if (isCustomerRoute && session) {
+    const hasCustomerRole = userRoles.includes("customer") || userRoles.includes("super_admin");
+    if (!hasCustomerRole) {
+      return (
+        <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center font-sans">
+          <div className="max-w-md w-full bg-white p-8 rounded-3xl border border-slate-100 shadow-xl space-y-6">
+            <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center mx-auto border border-rose-100">
+              <LockIcon className="w-8 h-8" />
+            </div>
+            <h1 className="text-xl font-black text-slate-900">This section is for customers.</h1>
+            <p className="text-sm text-slate-500">You do not have customer access under your current role(s). Please log in with a customer account.</p>
+            <button 
+              onClick={() => navigateTo("/")}
+              className="w-full py-4 bg-slate-900 text-white rounded-2xl text-sm font-bold shadow-lg hover:bg-slate-800 transition cursor-pointer"
+            >
+              Back to Home
+            </button>
           </div>
-          <h1 className="text-xl font-black text-slate-900">This section is for customers.</h1>
-          <p className="text-sm text-slate-500">Your account is registered as <b>{userProfile.role.replace('_', ' ')}</b>. Customer features are restricted to customer accounts.</p>
-          <button 
-            onClick={() => navigateTo("/")}
-            className="w-full py-4 bg-slate-900 text-white rounded-2xl text-sm font-bold shadow-lg hover:bg-slate-800 transition"
-          >
-            Back to Home
-          </button>
         </div>
-      </div>
-    );
+      );
+    }
   }
 
   if (currentPath === "/sign-up") {
@@ -344,6 +378,71 @@ export default function App() {
 
   if (currentPath === "/forgot-password") {
     return <ForgotPassword navigateTo={navigateTo} />;
+  }
+
+  const pathWithoutQuery = currentPath.split("?")[0];
+
+  if (currentPath.startsWith("/shop/")) {
+    const parts = pathWithoutQuery.split("/");
+    if (parts.length === 3) {
+      const slug = parts[2];
+      return <PublicShopWebsite slug={slug} navigateTo={navigateTo} />;
+    }
+  }
+
+  if (currentPath === "/owner-create-website") {
+    if (!session) {
+      navigateTo("/login");
+      return null;
+    }
+    const hasOwnerRole = userRoles.includes("shop_owner") || userRoles.includes("super_admin");
+    if (!hasOwnerRole) {
+      navigateTo("/owner-register");
+      return null;
+    }
+    return <OwnerCreateWebsite navigateTo={navigateTo} />;
+  }
+
+  if (currentPath === "/owner-dashboard") {
+    if (!session) {
+      navigateTo("/login");
+      return null;
+    }
+    const hasOwnerRole = userRoles.includes("shop_owner") || userRoles.includes("super_admin");
+    if (!hasOwnerRole) {
+      return (
+        <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center font-sans">
+          <div className="max-w-md w-full bg-white p-8 rounded-3xl border border-slate-100 shadow-xl space-y-6">
+            <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center mx-auto border border-rose-100">
+              <LockIcon className="w-8 h-8" />
+            </div>
+            <h1 className="text-xl font-black text-slate-900">Access Denied</h1>
+            <p className="text-sm text-slate-500">Only shop owners can access the owner dashboard. Please register your shop first.</p>
+            <button 
+              onClick={() => navigateTo("/owner-register")}
+              className="w-full py-4 bg-blue-600 text-white font-bold rounded-2xl text-sm shadow-lg hover:bg-blue-700 transition cursor-pointer"
+            >
+              Register Your Business
+            </button>
+            <button 
+              onClick={() => navigateTo("/")}
+              className="w-full py-4 bg-slate-100 text-slate-700 font-bold rounded-2xl text-sm hover:bg-slate-200 transition cursor-pointer"
+            >
+              Back to Home
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return <OwnerDashboardPlaceholder navigateTo={navigateTo} />;
+  }
+
+  if (currentPath === "/owner-register") {
+    if (!session) {
+      navigateTo("/login");
+      return null;
+    }
+    return <OwnerRegister navigateTo={navigateTo} />;
   }
 
   if (currentPath === "/customer") {
@@ -363,7 +462,7 @@ export default function App() {
   }
 
   if (currentPath.startsWith("/salon/")) {
-    const parts = currentPath.split("/");
+    const parts = pathWithoutQuery.split("/");
     if (parts.length === 3 && parts[2] !== "demo") {
       return <SalonDetail navigateTo={navigateTo} shopId={parts[2]} />;
     }
@@ -374,7 +473,7 @@ export default function App() {
   }
 
   if (currentPath.startsWith("/booking/")) {
-    const parts = currentPath.split("/");
+    const parts = pathWithoutQuery.split("/");
     // /booking/{shopId}
     if (parts.length === 3 && parts[2] !== "demo") {
       return <ServiceSelection navigateTo={navigateTo} shopId={parts[2]} />;
@@ -428,7 +527,7 @@ export default function App() {
   }
   
   if (currentPath.startsWith("/booking/details/")) {
-    const parts = currentPath.split("/");
+    const parts = pathWithoutQuery.split("/");
     if (parts.length === 4 && parts[3] !== "demo") {
       return <BookingDetails navigateTo={navigateTo} bookingId={parts[3]} />;
     }

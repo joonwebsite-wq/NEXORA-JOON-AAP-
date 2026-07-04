@@ -18,7 +18,8 @@ import {
   MoreVertical,
   ExternalLink,
   Info,
-  Sparkles
+  Sparkles,
+  Share2
 } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { 
@@ -56,6 +57,37 @@ const BookingDetails = ({ navigateTo, bookingId }: BookingDetailsProps) => {
   const [rating, setRating] = useState(0);
   const [reviewText, setReviewText] = useState("");
   const [submittingReview, setSubmittingReview] = useState(false);
+
+  const handleShare = async () => {
+    if (!booking || !shop) return;
+    
+    const serviceNames = services.map(s => s.service_name).join(", ");
+    
+    const shareText = `My Nexora SalonOS appointment:\n\nSalon: ${shop.shop_name}\nService: ${serviceNames || 'Salon Service'}\nDate: ${new Date(booking.booking_date).toLocaleDateString()}\nTime: ${booking.booking_time}\nStaff: ${staff?.staff_name || 'Any Available Expert'}\nLocation: ${shop.area}, ${shop.city}\nStatus: ${booking.status}\n\nBooked via Nexora SalonOS.`;
+    
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: "My Nexora Salon Appointment",
+          text: shareText,
+          url: window.location.href
+        });
+      } catch (err: any) {
+        if (err.name !== 'AbortError') {
+          console.error("Error sharing:", err);
+          setMessage({ type: 'error', text: "Unable to share appointment. Please try again." });
+        }
+      }
+    } else {
+      try {
+        await navigator.clipboard.writeText(shareText + "\n\n" + window.location.href);
+        setMessage({ type: 'success', text: "Appointment details copied to clipboard." });
+      } catch (err: any) {
+         console.error("Error copying to clipboard:", err);
+         setMessage({ type: 'error', text: "Unable to share appointment. Please try again." });
+      }
+    }
+  };
 
   useEffect(() => {
     fetchBookingData();
@@ -390,16 +422,24 @@ const BookingDetails = ({ navigateTo, bookingId }: BookingDetailsProps) => {
         {/* Actions */}
         {(booking.status === 'pending' || booking.status === 'confirmed') && (
             <div className="grid grid-cols-2 gap-4 pt-4">
+                {new Date(`${booking.booking_date}T${booking.booking_time}`).getTime() > new Date().getTime() && (
+                    <button 
+                      onClick={handleShare}
+                      className="col-span-2 flex items-center justify-center gap-2 py-4 px-6 bg-blue-50 text-blue-700 font-bold rounded-2xl text-xs border border-blue-100 hover:bg-blue-100 transition cursor-pointer"
+                    >
+                        <Share2 className="w-4 h-4" /> Share Appointment
+                    </button>
+                )}
                 <button 
                   onClick={() => alert("Reschedule flow will be connected later.")}
-                  className="flex items-center justify-center gap-2 py-4 px-6 bg-white text-slate-900 font-bold rounded-2xl text-xs border border-slate-200 shadow-sm hover:bg-slate-50 transition"
+                  className="flex items-center justify-center gap-2 py-4 px-6 bg-white text-slate-900 font-bold rounded-2xl text-xs border border-slate-200 shadow-sm hover:bg-slate-50 transition cursor-pointer"
                 >
                     <RefreshCcw className="w-4 h-4" /> Reschedule
                 </button>
                 <button 
                   disabled={cancelling}
                   onClick={handleCancelBooking}
-                  className={`flex items-center justify-center gap-2 py-4 px-6 bg-rose-50 text-rose-600 font-bold rounded-2xl text-xs border border-rose-100 hover:bg-rose-100 transition ${cancelling ? "opacity-50 cursor-not-allowed" : ""}`}
+                  className={`flex items-center justify-center gap-2 py-4 px-6 bg-rose-50 text-rose-600 font-bold rounded-2xl text-xs border border-rose-100 hover:bg-rose-100 transition cursor-pointer ${cancelling ? "opacity-50 cursor-not-allowed" : ""}`}
                 >
                     <XCircle className="w-4 h-4" /> {cancelling ? "Cancelling..." : "Cancel Booking"}
                 </button>

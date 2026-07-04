@@ -27,28 +27,37 @@ const Login = ({ navigateTo }: LoginProps) => {
       if (error) throw error;
       if (!data.user) throw new Error("No user returned");
 
-      // Fetch user profile
-      const { data: profile, error: profileError } = await supabase
-        .from("profiles")
+      // Fetch user roles
+      const { data: roles, error: rolesError } = await supabase
+        .from("user_roles")
         .select("role")
-        .eq("id", data.user.id)
-        .single();
+        .eq("user_id", data.user.id);
 
-      if (profileError) {
-        console.error("Error fetching profile:", profileError);
-        // Default to customer if profile missing
+      const userRoleList = roles ? roles.map((r: any) => r.role) : [];
+
+      if (userRoleList.includes("super_admin")) {
+        navigateTo("/admin");
+      } else if (userRoleList.includes("shop_owner")) {
+        navigateTo("/owner-dashboard");
+      } else if (userRoleList.includes("customer")) {
         navigateTo("/customer");
-        return;
-      }
+      } else {
+        // Fallback to profiles.role
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", data.user.id)
+          .single();
 
-      const role = profile?.role;
-      switch (role) {
-        case "customer": navigateTo("/customer"); break;
-        case "shop_owner": navigateTo("/owner-register"); break; // As requested
-        case "growth_partner": navigateTo("/growth-partner"); break;
-        case "distributor": navigateTo("/distributor-brand"); break;
-        case "super_admin": navigateTo("/admin"); break;
-        default: navigateTo("/customer");
+        const role = profile?.role;
+        switch (role) {
+          case "customer": navigateTo("/customer"); break;
+          case "shop_owner": navigateTo("/owner-dashboard"); break;
+          case "growth_partner": navigateTo("/growth-partner"); break;
+          case "distributor": navigateTo("/distributor-brand"); break;
+          case "super_admin": navigateTo("/admin"); break;
+          default: navigateTo("/customer");
+        }
       }
     } catch (err: any) {
       setErrorMessage("Invalid email or password.");
