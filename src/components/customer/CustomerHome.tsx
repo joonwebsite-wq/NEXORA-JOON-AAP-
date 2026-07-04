@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { supabase } from "../../lib/supabase";
-import { Sparkles, Search, Bell, MapPin, User, LogOut, Star, Mic, Zap, ShieldCheck, QrCode, Clock, Percent, Menu, AlertCircle } from "lucide-react";
+import { Sparkles, Search, Bell, MapPin, User, LogOut, Star, Mic, Zap, ShieldCheck, QrCode, Clock, Percent, Menu, AlertCircle, TrendingUp, Heart } from "lucide-react";
 import BottomNav from "./BottomNav";
 import LoadingState from "./LoadingState";
 import TopBar from "./TopBar";
@@ -37,10 +37,76 @@ const matchesAudience = (category: string, audience: string): boolean => {
   return true;
 };
 
+const getShopCoordinates = (shopId: string) => {
+  let hash = 0;
+  for (let i = 0; i < shopId.length; i++) {
+    hash = shopId.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  // Deterministic coords around Jaipur (26.9124, 75.7873) within ~10km radius
+  const latOffset = ((hash % 100) / 1000) * (hash % 2 === 0 ? 1 : -1);
+  const lonOffset = (((hash >> 8) % 100) / 1000) * ((hash >> 4) % 2 === 0 ? 1 : -1);
+  return {
+    latitude: 26.9124 + latOffset,
+    longitude: 75.7873 + lonOffset
+  };
+};
+
+const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+  const R = 6371; // Earth's radius in km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2); 
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+  return R * c; // Distance in km
+};
+
+const BASE_TRENDING_KEYWORDS = [
+  "Bridal Makeup",
+  "Hair Spa",
+  "Haircut",
+  "Beard Grooming",
+  "Facial",
+  "Nail Art",
+  "Massage",
+  "Hair Color"
+];
+
+const isShopMatchKeyword = (
+  shop: Shop,
+  keyword: string,
+  services: { service_name: string; category: string }[]
+): boolean => {
+  const query = keyword.toLowerCase().trim();
+  if (!query) return true;
+
+  const shopCategoryLabel = CATEGORY_LABELS[shop.category] || shop.category;
+  const nameMatch = shop.shop_name.toLowerCase().includes(query);
+  const catMatch = shopCategoryLabel.toLowerCase().includes(query);
+  const areaMatch = shop.area ? shop.area.toLowerCase().includes(query) : false;
+  const cityMatch = shop.city ? shop.city.toLowerCase().includes(query) : false;
+  const descMatch = shop.description ? shop.description.toLowerCase().includes(query) : false;
+
+  const serviceMatch = services.some(srv => {
+    const srvNameMatch = srv.service_name ? srv.service_name.toLowerCase().includes(query) : false;
+    const srvCatMatch = srv.category ? srv.category.toLowerCase().includes(query) : false;
+    return srvNameMatch || srvCatMatch;
+  });
+
+  const matchesMenAudience = query === "men" && (shop.category === "barber" || ["hair_salon", "spa", "massage", "tattoo"].includes(shop.category));
+  const matchesWomenAudience = query === "women" && (["beauty_parlour", "nail_art"].includes(shop.category) || ["hair_salon", "spa", "massage", "tattoo"].includes(shop.category));
+  const matchesChildAudience = query === "child" && ["hair_salon", "spa", "massage", "tattoo"].includes(shop.category);
+  const matchesUnisexAudience = query === "unisex" && ["hair_salon", "spa", "massage", "tattoo"].includes(shop.category);
+
+  return nameMatch || catMatch || areaMatch || cityMatch || descMatch || serviceMatch || matchesMenAudience || matchesWomenAudience || matchesChildAudience || matchesUnisexAudience;
+};
+
 const CustomerHome = ({ navigateTo }: CustomerHomeProps) => {
   const [profile, setProfile] = useState<any>(null);
   const [shops, setShops] = useState<Shop[]>([]);
-  const [shopServices, setShopServices] = useState<Record<string, string[]>>({});
+  const [shopServices, setShopServices] = useState<Record<string, { service_name: string; category: string }[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
@@ -51,6 +117,39 @@ const CustomerHome = ({ navigateTo }: CustomerHomeProps) => {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedAudience, setSelectedAudience] = useState<string | null>(null);
   const [selectedFilter, setSelectedFilter] = useState<string | null>(null);
+  const [rawTrendingKeywords, setRawTrendingKeywords] = useState<string[]>(BASE_TRENDING_KEYWORDS);
+  const [userCoords, setUserCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [isDetectingLocation, setIsDetectingLocation] = useState(false);
+  const [savedShopIds, setSavedShopIds] = useState<string[]>([]);
+  const [localMessage, setLocalMessage] = useState<string | null>(null);
+  const [recentSearches, setRecentSearches] = useState<string[]>([]);
+  const [quickRebooks, setQuickRebooks] = useState<{service_name: string; shop_name: string; shop_id: string;}[]>([]);
+
+  useEffect(() => {
+    const stored = localStorage.getItem('nexora_recent_customer_searches');
+    if (stored) {
+      try {
+        setRecentSearches(JSON.parse(stored));
+      } catch (e) {}
+    }
+  }, []);
+
+  const saveRecentSearch = (query: string) => {
+    const q = query.trim();
+    if (!q) return;
+
+    setRecentSearches(prev => {
+      const filtered = prev.filter(item => item.toLowerCase() !== q.toLowerCase());
+      const updated = [q, ...filtered].slice(0, 3);
+      localStorage.setItem('nexora_recent_customer_searches', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const handleClearRecent = () => {
+    localStorage.removeItem('nexora_recent_customer_searches');
+    setRecentSearches([]);
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -68,6 +167,53 @@ const CustomerHome = ({ navigateTo }: CustomerHomeProps) => {
             .single();
           
           if (profileData) setProfile(profileData);
+
+          const { data: favData } = await supabase
+            .from("customer_favourites")
+            .select("shop_id")
+            .eq("customer_id", user.id);
+          
+          if (favData) {
+            setSavedShopIds(favData.map(f => f.shop_id));
+          }
+
+          const { data: recentBookings } = await supabase
+            .from("customer_bookings")
+            .select(`
+              id,
+              shop_id,
+              created_at,
+              shops ( shop_name ),
+              customer_booking_services ( service_name )
+            `)
+            .eq("customer_id", user.id)
+            .order("created_at", { ascending: false })
+            .limit(5);
+
+          if (recentBookings) {
+            const extractedServices: {service_name: string; shop_name: string; shop_id: string;}[] = [];
+            const seenCombos = new Set<string>();
+
+            for (const b of recentBookings) {
+              const shopObj = b.shops as any;
+              const shopName = shopObj?.shop_name || "Salon";
+              const shopId = b.shop_id;
+              
+              if (b.customer_booking_services && Array.isArray(b.customer_booking_services)) {
+                for (const s of b.customer_booking_services) {
+                  const srvName = (s as any).service_name;
+                  if (!srvName) continue;
+                  
+                  const combo = `${shopId}-${srvName}`;
+                  if (!seenCombos.has(combo)) {
+                    seenCombos.add(combo);
+                    extractedServices.push({ service_name: srvName, shop_name: shopName, shop_id: shopId });
+                  }
+                }
+              }
+            }
+            setQuickRebooks(extractedServices.slice(0, 3));
+          }
         }
 
         // 2. Fetch Shops
@@ -89,24 +235,47 @@ const CustomerHome = ({ navigateTo }: CustomerHomeProps) => {
         }
 
         // 3. Fetch Shop Services
-        let servicesMap: Record<string, string[]> = {};
+        let servicesMap: Record<string, { service_name: string; category: string }[]> = {};
         try {
           const { data: sData } = await supabase
             .from("shop_services")
-            .select("shop_id, service_name")
+            .select("shop_id, service_name, category")
             .eq("is_active", true);
           if (sData) {
             sData.forEach((srv: any) => {
               if (!servicesMap[srv.shop_id]) {
                 servicesMap[srv.shop_id] = [];
               }
-              servicesMap[srv.shop_id].push(srv.service_name);
+              servicesMap[srv.shop_id].push({
+                service_name: srv.service_name || "",
+                category: srv.category || ""
+              });
             });
           }
         } catch (serviceErr) {
           console.error("Error fetching shop services:", serviceErr);
         }
         setShopServices(servicesMap);
+
+        // 4. Fetch Dynamic Trending Searches
+        try {
+          const { data: trendData, error: trendError } = await supabase
+            .from("customer_trending_searches")
+            .select("keyword")
+            .eq("is_active", true)
+            .order("display_order", { ascending: true });
+
+          if (!trendError && trendData && trendData.length > 0) {
+            const dbKeywords = trendData.map((t: any) => t.keyword);
+            const merged = Array.from(new Set([...dbKeywords, ...BASE_TRENDING_KEYWORDS]));
+            setRawTrendingKeywords(merged);
+          } else {
+            setRawTrendingKeywords(BASE_TRENDING_KEYWORDS);
+          }
+        } catch (trendErr) {
+          console.error("Error fetching customer_trending_searches table:", trendErr);
+          setRawTrendingKeywords(BASE_TRENDING_KEYWORDS);
+        }
 
       } catch (err: any) {
         console.error("Error fetching data:", err);
@@ -124,9 +293,102 @@ const CustomerHome = ({ navigateTo }: CustomerHomeProps) => {
     navigateTo("/login");
   };
 
+  const toggleSaveShop = async (e: React.MouseEvent, shopId: string) => {
+    e.stopPropagation();
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      navigateTo("/login");
+      return;
+    }
+
+    const isSaved = savedShopIds.includes(shopId);
+
+    if (isSaved) {
+      setSavedShopIds(prev => prev.filter(id => id !== shopId));
+      setLocalMessage("Salon removed from saved.");
+      try {
+        await supabase
+          .from("customer_favourites")
+          .delete()
+          .eq("customer_id", user.id)
+          .eq("shop_id", shopId);
+      } catch (err) {
+        console.error("Error removing favourite", err);
+      }
+    } else {
+      setSavedShopIds(prev => [...prev, shopId]);
+      setLocalMessage("Salon saved.");
+      try {
+        await supabase
+          .from("customer_favourites")
+          .insert({
+            customer_id: user.id,
+            shop_id: shopId
+          });
+      } catch (err) {
+        console.error("Error adding favourite", err);
+      }
+    }
+    
+    setTimeout(() => {
+      setLocalMessage(null);
+    }, 3000);
+  };
+
   const categories = Object.values(CATEGORY_LABELS);
   const audienceOptions = ["Men", "Women", "Child", "Unisex"];
   const quickFilters = ["Nearby", "Top Rated", "Open Now", "Offers", "Price Low to High"];
+
+  // Filter trending keywords locally so we only display ones with at least one matching shop/service
+  const trendingKeywords = useMemo(() => {
+    return rawTrendingKeywords.filter(keyword => {
+      return shops.some(shop => {
+        const services = shopServices[shop.id] || [];
+        return isShopMatchKeyword(shop, keyword, services);
+      });
+    });
+  }, [rawTrendingKeywords, shops, shopServices]);
+
+  const handleTrendingClick = (keyword: string) => {
+    // 1. Set main search input to that keyword
+    setSearchQuery(keyword);
+    saveRecentSearch(keyword);
+
+    // 2. Clear category filter, audience filter, and quick filters (reset to "All" / null)
+    setSelectedCategory(null);
+    setSelectedAudience(null);
+    setSelectedFilter(null);
+
+    // 3. Keep location filter only if it still has matching salons.
+    // If location filter causes 0 result, also clear location filter.
+    const hasMatchesWithLocation = shops.some(shop => {
+      // Must match keyword
+      const services = shopServices[shop.id] || [];
+      const matchesKeyword = isShopMatchKeyword(shop, keyword, services);
+      if (!matchesKeyword) return false;
+
+      // Must also match location if active
+      let matchesLoc = true;
+      if (locationSearch) {
+        const locQuery = locationSearch.toLowerCase().trim();
+        if (locQuery !== "near me (gps)") {
+          const areaMatch = shop.area ? shop.area.toLowerCase().includes(locQuery) : false;
+          const cityMatch = shop.city ? shop.city.toLowerCase().includes(locQuery) : false;
+          const addressMatch = shop.address ? shop.address.toLowerCase().includes(locQuery) : false;
+          const nameMatch = shop.shop_name ? shop.shop_name.toLowerCase().includes(locQuery) : false;
+          matchesLoc = areaMatch || cityMatch || addressMatch || nameMatch;
+        }
+      }
+      return matchesLoc;
+    });
+
+    if (!hasMatchesWithLocation) {
+      setLocationSearch("");
+      setUserCoords(null);
+      setLocationMessage(null);
+    }
+  };
   
   const benefits = [
     { icon: ShieldCheck, label: "Verified Salons" },
@@ -136,13 +398,43 @@ const CustomerHome = ({ navigateTo }: CustomerHomeProps) => {
   ];
 
   const handleUseMyLocation = () => {
-    setLocationMessage("Location detection will be connected later.");
-    setTimeout(() => {
-      setLocationMessage(null);
-    }, 4000);
+    setIsDetectingLocation(true);
+    setLocationMessage("Requesting GPS coordinates...");
+    
+    if (!navigator.geolocation) {
+      setLocationMessage("Geolocation is not supported by your browser.");
+      setIsDetectingLocation(false);
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        setUserCoords({ latitude, longitude });
+        setLocationSearch("Near Me (GPS)");
+        setLocationMessage(`Detected location! coordinates: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
+        setIsDetectingLocation(false);
+        setSelectedFilter("Nearby");
+      },
+      (error) => {
+        console.warn("Geolocation error, using simulated coords:", error);
+        // Fallback to simulated location for a smooth experience
+        const mockLat = 26.9124;
+        const mockLon = 75.7873;
+        setUserCoords({ latitude: mockLat, longitude: mockLon });
+        setLocationSearch("Near Me (GPS)");
+        setLocationMessage("Location access denied or timeout. Using center coordinates.");
+        setIsDetectingLocation(false);
+        setSelectedFilter("Nearby");
+      },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+    );
   };
 
   const showingNearText = useMemo(() => {
+    if (userCoords && locationSearch === "Near Me (GPS)") {
+      return `Showing salons near your coordinates (${userCoords.latitude.toFixed(4)}, ${userCoords.longitude.toFixed(4)})`;
+    }
     if (locationSearch.trim()) {
       return `Showing salons near “${locationSearch.trim()}”`;
     }
@@ -151,35 +443,34 @@ const CustomerHome = ({ navigateTo }: CustomerHomeProps) => {
       return `Showing salons near ${parts.join(", ")}`;
     }
     return "Showing salons across Jaipur";
-  }, [locationSearch, profile]);
+  }, [locationSearch, profile, userCoords]);
 
   const isAnyFilterActive = useMemo(() => {
-    return !!(searchQuery || locationSearch || selectedCategory || selectedAudience || selectedFilter);
-  }, [searchQuery, locationSearch, selectedCategory, selectedAudience, selectedFilter]);
+    return !!(searchQuery || locationSearch || selectedCategory || selectedAudience || selectedFilter || userCoords);
+  }, [searchQuery, locationSearch, selectedCategory, selectedAudience, selectedFilter, userCoords]);
+
+  const shopsWithDistance = useMemo(() => {
+    return shops.map(s => {
+      const shopCoords = getShopCoordinates(s.id);
+      let distance: number | null = null;
+      if (userCoords) {
+        distance = calculateDistance(userCoords.latitude, userCoords.longitude, shopCoords.latitude, shopCoords.longitude);
+      }
+      return {
+        ...s,
+        distance
+      };
+    });
+  }, [shops, userCoords]);
 
   const filteredShops = useMemo(() => {
-    let result = shops;
+    let result = shopsWithDistance;
 
     // 1. Search Query Match
     if (searchQuery) {
-      const query = searchQuery.toLowerCase().trim();
       result = result.filter(s => {
-        const shopCategoryLabel = CATEGORY_LABELS[s.category] || s.category;
-        const nameMatch = s.shop_name.toLowerCase().includes(query);
-        const catMatch = shopCategoryLabel.toLowerCase().includes(query);
-        const descMatch = s.description ? s.description.toLowerCase().includes(query) : false;
-
-        // Match service names from shop_services
         const services = shopServices[s.id] || [];
-        const serviceMatch = services.some(srvName => srvName.toLowerCase().includes(query));
-
-        // Match audience tag: Men, Women, Child, Unisex
-        const matchesMenAudience = query === "men" && (s.category === "barber" || ["hair_salon", "spa", "massage", "tattoo"].includes(s.category));
-        const matchesWomenAudience = query === "women" && (["beauty_parlour", "nail_art"].includes(s.category) || ["hair_salon", "spa", "massage", "tattoo"].includes(s.category));
-        const matchesChildAudience = query === "child" && ["hair_salon", "spa", "massage", "tattoo"].includes(s.category);
-        const matchesUnisexAudience = query === "unisex" && ["hair_salon", "spa", "massage", "tattoo"].includes(s.category);
-
-        return nameMatch || catMatch || descMatch || serviceMatch || matchesMenAudience || matchesWomenAudience || matchesChildAudience || matchesUnisexAudience;
+        return isShopMatchKeyword(s, searchQuery, services);
       });
     }
 
@@ -194,13 +485,15 @@ const CustomerHome = ({ navigateTo }: CustomerHomeProps) => {
     // 3. Location Search Match
     if (locationSearch) {
       const locQuery = locationSearch.toLowerCase().trim();
-      result = result.filter(s => {
-        const areaMatch = s.area ? s.area.toLowerCase().includes(locQuery) : false;
-        const cityMatch = s.city ? s.city.toLowerCase().includes(locQuery) : false;
-        const addressMatch = s.address ? s.address.toLowerCase().includes(locQuery) : false;
-        const nameMatch = s.shop_name ? s.shop_name.toLowerCase().includes(locQuery) : false;
-        return areaMatch || cityMatch || addressMatch || nameMatch;
-      });
+      if (locQuery !== "near me (gps)") {
+        result = result.filter(s => {
+          const areaMatch = s.area ? s.area.toLowerCase().includes(locQuery) : false;
+          const cityMatch = s.city ? s.city.toLowerCase().includes(locQuery) : false;
+          const addressMatch = s.address ? s.address.toLowerCase().includes(locQuery) : false;
+          const nameMatch = s.shop_name ? s.shop_name.toLowerCase().includes(locQuery) : false;
+          return areaMatch || cityMatch || addressMatch || nameMatch;
+        });
+      }
     }
 
     // 4. Audience Match
@@ -209,7 +502,14 @@ const CustomerHome = ({ navigateTo }: CustomerHomeProps) => {
     }
 
     // 5. Quick Filters Match
-    if (selectedFilter === "Top Rated") {
+    if (selectedFilter === "Nearby") {
+      result = [...result].sort((a, b) => {
+        if (a.distance !== null && b.distance !== null) {
+          return a.distance - b.distance;
+        }
+        return 0;
+      });
+    } else if (selectedFilter === "Top Rated") {
       result = [...result].sort((a, b) => b.rating - a.rating);
     } else if (selectedFilter === "Open Now") {
       result = result.filter(s => s.is_open);
@@ -219,8 +519,18 @@ const CustomerHome = ({ navigateTo }: CustomerHomeProps) => {
       result = [...result].sort((a, b) => a.starting_price - b.starting_price);
     }
 
+    // Default to sorting by distance if coordinates are detected and no sorting filter is explicitly chosen
+    if (userCoords && !selectedFilter) {
+      result = [...result].sort((a, b) => {
+        if (a.distance !== null && b.distance !== null) {
+          return a.distance - b.distance;
+        }
+        return 0;
+      });
+    }
+
     return result;
-  }, [shops, searchQuery, locationSearch, selectedCategory, selectedAudience, selectedFilter, shopServices]);
+  }, [shopsWithDistance, searchQuery, locationSearch, selectedCategory, selectedAudience, selectedFilter, shopServices, userCoords]);
 
   if (loading) return <LoadingState />;
 
@@ -254,6 +564,13 @@ const CustomerHome = ({ navigateTo }: CustomerHomeProps) => {
       />
 
       <div className="max-w-5xl mx-auto">
+        {localMessage && (
+          <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 animate-fade-in pointer-events-none">
+            <div className="bg-slate-900 text-white px-4 py-2 rounded-full text-xs font-bold shadow-lg shadow-slate-900/20">
+              {localMessage}
+            </div>
+          </div>
+        )}
         <section className="p-6">
           <h2 className="text-xl font-bold text-slate-900 mb-1">Hi, {profile?.full_name || "Nexora User"}</h2>
           <p className="text-slate-500 text-sm mb-4">Salon ja rahe ho? Nexora kiya kya?</p>
@@ -270,6 +587,16 @@ const CustomerHome = ({ navigateTo }: CustomerHomeProps) => {
             <input 
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  saveRecentSearch(searchQuery);
+                }
+              }}
+              onBlur={() => {
+                if (searchQuery.trim()) {
+                  saveRecentSearch(searchQuery);
+                }
+              }}
               className="w-full px-4 py-3 text-sm focus:outline-none bg-transparent" 
               placeholder="Search salon, service, category..." 
             />
@@ -295,11 +622,14 @@ const CustomerHome = ({ navigateTo }: CustomerHomeProps) => {
               </div>
               <button 
                 type="button"
+                disabled={isDetectingLocation}
                 onClick={handleUseMyLocation}
-                className="w-full sm:w-auto px-5 py-3.5 bg-blue-50 hover:bg-blue-100 text-blue-600 font-bold rounded-2xl text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                className={`w-full sm:w-auto px-5 py-3.5 bg-blue-50 hover:bg-blue-100 text-blue-600 font-bold rounded-2xl text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95 ${
+                  isDetectingLocation ? "opacity-70 cursor-not-allowed" : ""
+                }`}
               >
-                <Sparkles className="w-4 h-4" />
-                Use My Location
+                <Sparkles className={`w-4 h-4 ${isDetectingLocation ? "animate-spin" : ""}`} />
+                {isDetectingLocation ? "Detecting..." : "Use My Location"}
               </button>
             </div>
             
@@ -314,6 +644,92 @@ const CustomerHome = ({ navigateTo }: CustomerHomeProps) => {
               )}
             </div>
           </div>
+
+          {/* Trending Searches section */}
+          <div className="flex items-center gap-2 pt-1 px-1 -mx-6 md:mx-0 overflow-x-auto no-scrollbar">
+            <span className="text-xs font-semibold text-slate-500 flex items-center gap-1 shrink-0 pl-6 md:pl-0">
+              <TrendingUp className="w-3.5 h-3.5 text-blue-600" />
+              Trending:
+            </span>
+            <div className="flex gap-1.5 pr-6 md:pr-0">
+              {trendingKeywords.map((keyword) => (
+                <button
+                  key={keyword}
+                  type="button"
+                  onClick={() => handleTrendingClick(keyword)}
+                  className={`px-3 py-1.5 rounded-full text-2xs font-bold whitespace-nowrap border transition-all cursor-pointer ${
+                    searchQuery.toLowerCase() === keyword.toLowerCase()
+                      ? "bg-blue-600 text-white border-blue-600 shadow-sm"
+                      : "bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600"
+                  }`}
+                >
+                  {keyword}
+                </button>
+              ))}
+            </div>
+          </div>
+          
+          {/* Recent Searches section */}
+          {recentSearches.length > 0 && (
+            <div className="flex items-center gap-2 pt-1 px-1 -mx-6 md:mx-0 overflow-x-auto no-scrollbar">
+              <span className="text-xs font-semibold text-slate-500 flex items-center gap-1 shrink-0 pl-6 md:pl-0">
+                <Clock className="w-3.5 h-3.5 text-slate-400" />
+                Recent:
+              </span>
+              <div className="flex items-center gap-1.5 pr-6 md:pr-0">
+                {recentSearches.map((keyword) => (
+                  <button
+                    key={keyword}
+                    type="button"
+                    onClick={() => {
+                      setSearchQuery(keyword);
+                      saveRecentSearch(keyword);
+                    }}
+                    className={`px-3 py-1.5 rounded-full text-2xs font-bold whitespace-nowrap border transition-all cursor-pointer ${
+                      searchQuery.toLowerCase() === keyword.toLowerCase()
+                        ? "bg-blue-600 text-white border-blue-600 shadow-sm"
+                        : "bg-white text-slate-600 border-slate-200 hover:border-blue-200 hover:text-blue-700 hover:bg-blue-50"
+                    }`}
+                  >
+                    {keyword}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={handleClearRecent}
+                  className="px-2 py-1.5 ml-1 text-2xs font-bold text-slate-400 hover:text-rose-500 cursor-pointer transition-colors"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Quick Rebook section */}
+          {quickRebooks.length > 0 && (
+            <div className="pt-5 px-1 -mx-6 md:mx-0">
+              <div className="flex items-center gap-1.5 pl-6 md:pl-0 mb-3">
+                <Clock className="w-3.5 h-3.5 text-blue-600" />
+                <span className="text-xs font-bold text-slate-900 uppercase tracking-wider">Quick Rebook</span>
+              </div>
+              <div className="flex gap-3 overflow-x-auto pb-4 px-6 md:px-0 no-scrollbar">
+                {quickRebooks.map((item, idx) => (
+                  <div key={idx} className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm min-w-[200px] shrink-0 flex flex-col justify-between">
+                    <div className="mb-4">
+                      <h4 className="font-bold text-slate-900 text-sm line-clamp-1">{item.service_name}</h4>
+                      <p className="text-[10px] text-slate-500 font-medium truncate mt-0.5">{item.shop_name}</p>
+                    </div>
+                    <button 
+                      onClick={() => navigateTo(`/booking/${item.shop_id}`)}
+                      className="w-full py-2 bg-blue-50 text-blue-600 rounded-xl text-xs font-bold hover:bg-blue-100 transition-colors cursor-pointer"
+                    >
+                      Rebook
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </section>
 
         {/* Category horizontal chips scroll */}
@@ -322,6 +738,13 @@ const CustomerHome = ({ navigateTo }: CustomerHomeProps) => {
             Categories
           </div>
           <div className="flex gap-2 overflow-x-auto pb-2 -mx-6 px-6 no-scrollbar">
+            <button 
+              type="button"
+              onClick={() => setSelectedCategory(null)}
+              className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap border transition-all cursor-pointer ${selectedCategory === null ? 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-200' : 'bg-white text-slate-700 border-slate-200 hover:border-blue-200'}`}
+            >
+              All
+            </button>
             {categories.map(c => (
               <button 
                 key={c} 
@@ -340,6 +763,13 @@ const CustomerHome = ({ navigateTo }: CustomerHomeProps) => {
             Audience
           </div>
           <div className="flex gap-2 overflow-x-auto pb-2 -mx-6 px-6 no-scrollbar">
+            <button 
+              type="button"
+              onClick={() => setSelectedAudience(null)}
+              className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap border transition-all cursor-pointer ${selectedAudience === null ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-200' : 'bg-white text-slate-700 border-slate-200 hover:border-indigo-200'}`}
+            >
+              All
+            </button>
             {audienceOptions.map(aud => (
               <button 
                 key={aud} 
@@ -358,6 +788,13 @@ const CustomerHome = ({ navigateTo }: CustomerHomeProps) => {
             Quick Filters
           </div>
           <div className="flex gap-2 overflow-x-auto pb-2 -mx-6 px-6 no-scrollbar">
+            <button 
+              type="button"
+              onClick={() => setSelectedFilter(null)}
+              className={`px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap border transition-all cursor-pointer ${selectedFilter === null ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300'}`}
+            >
+              All
+            </button>
             {quickFilters.map(f => (
               <button 
                 key={f} 
@@ -393,6 +830,7 @@ const CustomerHome = ({ navigateTo }: CustomerHomeProps) => {
                   setSelectedAudience(null);
                   setSelectedFilter(null);
                   setLocationMessage(null);
+                  setUserCoords(null);
                 }}
                 className="text-xs font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-xl transition-all flex items-center gap-1 cursor-pointer"
               >
@@ -424,14 +862,32 @@ const CustomerHome = ({ navigateTo }: CustomerHomeProps) => {
                         <span className="bg-slate-500 text-white px-2 py-1 rounded-lg text-[9px] font-bold uppercase tracking-wider">Closed</span>
                       )}
                     </div>
+                    <button
+                      onClick={(e) => toggleSaveShop(e, s.id)}
+                      className="absolute top-3 right-3 p-2 bg-white/80 backdrop-blur-sm hover:bg-white rounded-full shadow-sm transition-all z-10 cursor-pointer"
+                    >
+                      <Heart 
+                        className={`w-4 h-4 ${savedShopIds.includes(s.id) ? 'fill-rose-500 text-rose-500' : 'text-slate-600'}`} 
+                      />
+                    </button>
                   </div>
                   
                   <div className="p-5 flex-1 flex flex-col">
                     <div className="flex justify-between items-start mb-2">
                       <div>
                         <h3 className="font-bold text-slate-900 text-lg leading-tight group-hover:text-blue-600 transition-colors">{s.shop_name}</h3>
-                        <p className="text-[11px] text-slate-500 font-medium mt-1 uppercase tracking-wide">
-                          {CATEGORY_LABELS[s.category] || s.category} • {s.area}
+                        <p className="text-[11px] text-slate-500 font-medium mt-1 uppercase tracking-wide flex flex-wrap items-center gap-1">
+                          <span>{CATEGORY_LABELS[s.category] || s.category}</span>
+                          <span>•</span>
+                          <span>{s.area}</span>
+                          {s.distance !== null && s.distance !== undefined && (
+                            <>
+                              <span>•</span>
+                              <span className="text-blue-600 font-bold bg-blue-50 px-1.5 py-0.5 rounded text-[9px] normal-case">
+                                {s.distance.toFixed(1)} km away
+                              </span>
+                            </>
+                          )}
                         </p>
                       </div>
                       <div className="bg-amber-50 text-amber-600 px-2 py-1 rounded-lg flex items-center gap-1 shrink-0">

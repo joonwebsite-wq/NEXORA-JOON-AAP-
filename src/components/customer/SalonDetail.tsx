@@ -23,6 +23,8 @@ const SalonDetail = ({ navigateTo, shopId }: SalonDetailProps) => {
   const [staff, setStaff] = useState<ShopStaff[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isSaved, setIsSaved] = useState(false);
+  const [localMessage, setLocalMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (shopId && shopId !== "demo") {
@@ -48,14 +50,28 @@ const SalonDetail = ({ navigateTo, shopId }: SalonDetailProps) => {
       setShop(shopData);
 
       // 2. Fetch Services, Staff, and Reviews in parallel
-      const [servicesRes, staffRes, reviewsRes] = await Promise.all([
+      const { data: { user } } = await supabase.auth.getUser();
+
+      const promises = [
         supabase.from("shop_services").select("*").eq("shop_id", shopId).eq("is_active", true),
         supabase.from("shop_staff").select("*").eq("shop_id", shopId).eq("is_active", true),
         supabase.from("customer_reviews").select(`
           *,
           profiles:customer_id (full_name)
         `).eq("shop_id", shopId).order('created_at', { ascending: false })
-      ]);
+      ];
+
+      if (user) {
+        promises.push(
+          supabase.from("customer_favourites").select("*").eq("customer_id", user.id).eq("shop_id", shopId) as any
+        );
+      }
+
+      const results = await Promise.all(promises);
+      const servicesRes = results[0];
+      const staffRes = results[1];
+      const reviewsRes = results[2];
+      const favRes = user ? results[3] : null;
 
       if (servicesRes.error) throw servicesRes.error;
       if (staffRes.error) throw staffRes.error;
@@ -64,6 +80,12 @@ const SalonDetail = ({ navigateTo, shopId }: SalonDetailProps) => {
       setServices(servicesRes.data || []);
       setStaff(staffRes.data || []);
       setReviews(reviewsRes.data || []);
+      
+      if (favRes && favRes.data && favRes.data.length > 0) {
+        setIsSaved(true);
+      } else {
+        setIsSaved(false);
+      }
 
     } catch (err: any) {
       console.error("Error fetching salon data:", err);
@@ -77,6 +99,47 @@ const SalonDetail = ({ navigateTo, shopId }: SalonDetailProps) => {
     if (reviews.length === 0) return shop?.rating || 0;
     const sum = reviews.reduce((acc, rev) => acc + rev.rating, 0);
     return (sum / reviews.length).toFixed(1);
+  };
+
+  const toggleSaveShop = async () => {
+    if (shopId === "demo") return;
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      navigateTo("/login");
+      return;
+    }
+
+    if (isSaved) {
+      setIsSaved(false);
+      setLocalMessage("Salon removed from saved.");
+      try {
+        await supabase
+          .from("customer_favourites")
+          .delete()
+          .eq("customer_id", user.id)
+          .eq("shop_id", shopId);
+      } catch (err) {
+        console.error("Error removing favourite", err);
+      }
+    } else {
+      setIsSaved(true);
+      setLocalMessage("Salon saved.");
+      try {
+        await supabase
+          .from("customer_favourites")
+          .insert({
+            customer_id: user.id,
+            shop_id: shopId
+          });
+      } catch (err) {
+        console.error("Error adding favourite", err);
+      }
+    }
+    
+    setTimeout(() => {
+      setLocalMessage(null);
+    }, 3000);
   };
 
   if (loading) return <LoadingState />;
@@ -122,6 +185,13 @@ const SalonDetail = ({ navigateTo, shopId }: SalonDetailProps) => {
   return (
     <div className="min-h-screen bg-slate-50 pb-28 font-sans">
       {/* Top Bar */}
+      {localMessage && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 animate-fade-in pointer-events-none">
+          <div className="bg-slate-900 text-white px-4 py-2 rounded-full text-xs font-bold shadow-lg shadow-slate-900/20">
+            {localMessage}
+          </div>
+        </div>
+      )}
       <TopBar 
         title={displayShop.shop_name} 
         onBack={() => navigateTo("/customer")} 
@@ -134,6 +204,12 @@ const SalonDetail = ({ navigateTo, shopId }: SalonDetailProps) => {
       {/* Hero */}
       <section className="relative h-64 bg-slate-200">
         <img src={getShopImage(displayShop)} alt={displayShop.shop_name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+        <button 
+          onClick={toggleSaveShop}
+          className="absolute top-6 right-6 p-3 bg-white/80 backdrop-blur-sm hover:bg-white rounded-full shadow-lg transition-all z-10 cursor-pointer"
+        >
+          <Heart className={`w-5 h-5 ${isSaved ? 'fill-rose-500 text-rose-500' : 'text-slate-600'}`} />
+        </button>
       </section>
 
       <div className="max-w-2xl mx-auto -mt-16 px-4 space-y-6">

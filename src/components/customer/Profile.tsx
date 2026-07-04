@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from "react";
-import { ArrowLeft, LogOut, Award, User, Clock, Star, MapPin, ChevronRight, Bell, HelpCircle, Shield, Settings, Scissors, Sparkles, Search } from "lucide-react";
+import { ArrowLeft, LogOut, Award, User, Clock, Star, MapPin, ChevronRight, Bell, HelpCircle, Shield, Settings, Scissors, Sparkles, Search, Heart } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import TopBar from "./TopBar";
 import BottomNav from "./BottomNav";
+
+import { getShopImage } from "../../lib/shopUtils";
 
 interface ProfileProps {
   navigateTo: (path: string) => void;
@@ -15,6 +17,8 @@ const Profile = ({ navigateTo }: ProfileProps) => {
   const [bookingsCount, setBookingsCount] = useState<number>(0);
   const [completedCount, setCompletedCount] = useState<number>(0);
   const [debugInfo, setDebugInfo] = useState<{ userId: string; favCount: number | null }>({ userId: "Not Authenticated", favCount: null });
+  const [savedSalons, setSavedSalons] = useState<any[]>([]);
+  const [localMessage, setLocalMessage] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchProfile() {
@@ -32,13 +36,25 @@ const Profile = ({ navigateTo }: ProfileProps) => {
 
         // Fetch stats in parallel
         const [favsRes, reviewsRes, bookingsRes] = await Promise.all([
-          supabase.from('customer_favourites').select('*', { count: 'exact', head: true }).eq('customer_id', user.id),
+          supabase.from('customer_favourites').select('shop_id').eq('customer_id', user.id),
           supabase.from('customer_reviews').select('*', { count: 'exact', head: true }).eq('customer_id', user.id),
           supabase.from('customer_bookings').select('*', { count: 'exact', head: true }).eq('customer_id', user.id)
         ]);
         
-        if (!favsRes.error) {
-          setDebugInfo(prev => ({ ...prev, favCount: favsRes.count }));
+        if (!favsRes.error && favsRes.data) {
+          setDebugInfo(prev => ({ ...prev, favCount: favsRes.data.length }));
+          
+          if (favsRes.data.length > 0) {
+            const shopIds = favsRes.data.map(f => f.shop_id);
+            const { data: shopsData } = await supabase
+              .from('shops')
+              .select('id, shop_name, category, area, city, rating, starting_price, is_verified, is_open, cover_image_url')
+              .in('id', shopIds);
+              
+            if (shopsData) {
+              setSavedSalons(shopsData);
+            }
+          }
         }
 
         if (!reviewsRes.error) {
@@ -68,6 +84,29 @@ const Profile = ({ navigateTo }: ProfileProps) => {
     navigateTo("/login");
   };
 
+  const removeSavedSalon = async (shopId: string) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    
+    setSavedSalons(prev => prev.filter(s => s.id !== shopId));
+    setDebugInfo(prev => ({ ...prev, favCount: (prev.favCount || 1) - 1 }));
+    setLocalMessage("Salon removed from saved.");
+    
+    try {
+      await supabase
+        .from("customer_favourites")
+        .delete()
+        .eq("customer_id", user.id)
+        .eq("shop_id", shopId);
+    } catch (err) {
+      console.error("Error removing fav", err);
+    }
+    
+    setTimeout(() => {
+      setLocalMessage(null);
+    }, 3000);
+  };
+
   const menuItems = [
     { icon: User, label: "Edit Profile", path: "/profile/edit" },
     { icon: Clock, label: "My Bookings", path: "/my-bookings" },
@@ -79,6 +118,13 @@ const Profile = ({ navigateTo }: ProfileProps) => {
 
   return (
     <div className="min-h-screen bg-slate-50 pb-24 font-sans">
+      {localMessage && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 animate-fade-in pointer-events-none">
+          <div className="bg-slate-900 text-white px-4 py-2 rounded-full text-xs font-bold shadow-lg shadow-slate-900/20">
+            {localMessage}
+          </div>
+        </div>
+      )}
       <TopBar 
         title="My Profile" 
         onBack={() => navigateTo("/customer")} 
@@ -153,18 +199,88 @@ const Profile = ({ navigateTo }: ProfileProps) => {
 
         {/* Favourites */}
         <div>
-            <h3 className="font-bold text-slate-900 text-sm mb-3">Favourite Salons</h3>
-            <div className="space-y-2">
-                {["Chique Salon & Luxury Spa", "Royal Touch Salon", "Urban Bloom Beauty Studio"].map(s => (
-                    <div key={s} className="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center"><Scissors className="w-4 h-4 text-slate-600" /></div>
-                            <span className="text-xs font-bold text-slate-900">{s}</span>
-                        </div>
-                        <button onClick={() => navigateTo("/salon/demo")} className="text-[10px] font-bold text-blue-600">View</button>
-                    </div>
-                ))}
-            </div>
+            <h3 className="font-bold text-slate-900 text-sm mb-3">Saved Salons</h3>
+            {savedSalons.length > 0 ? (
+              <div className="space-y-4">
+                  {savedSalons.map(s => (
+                      <div key={s.id} className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden flex flex-col group">
+                          <div className="relative h-32 bg-slate-100">
+                              <img src={getShopImage(s)} alt={s.shop_name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                              <div className="absolute top-2 left-2 flex gap-1">
+                                {s.is_verified && (
+                                  <span className="bg-blue-600 text-white px-2 py-0.5 rounded-lg text-[9px] font-bold uppercase tracking-wider">
+                                    Verified
+                                  </span>
+                                )}
+                                {s.is_open ? (
+                                  <span className="bg-emerald-500 text-white px-2 py-0.5 rounded-lg text-[9px] font-bold uppercase tracking-wider">Open</span>
+                                ) : (
+                                  <span className="bg-slate-500 text-white px-2 py-0.5 rounded-lg text-[9px] font-bold uppercase tracking-wider">Closed</span>
+                                )}
+                              </div>
+                              <button
+                                onClick={() => removeSavedSalon(s.id)}
+                                className="absolute top-2 right-2 p-1.5 bg-white/80 backdrop-blur-sm hover:bg-white rounded-full shadow-sm transition-all z-10 cursor-pointer"
+                              >
+                                <span className="text-xs text-rose-500 font-bold px-1">Remove</span>
+                              </button>
+                          </div>
+                          
+                          <div className="p-4 flex-1 flex flex-col">
+                            <div className="flex justify-between items-start mb-1">
+                              <h3 className="font-bold text-slate-900 text-base leading-tight">{s.shop_name}</h3>
+                              <div className="bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded flex items-center gap-1 shrink-0">
+                                <Star className="w-2.5 h-2.5 fill-amber-600" />
+                                <span className="text-[10px] font-bold">{s.rating}</span>
+                              </div>
+                            </div>
+                            
+                            <p className="text-[11px] text-slate-500 font-medium uppercase tracking-wide flex items-center gap-1 mb-3">
+                              <span>{s.category.replace('_', ' ')}</span>
+                              <span>•</span>
+                              <span>{s.area}, {s.city}</span>
+                            </p>
+                            
+                            <div className="mt-auto pt-3 border-t border-slate-50 flex items-center justify-between mb-3">
+                              <div>
+                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Starting from</p>
+                                <p className="font-black text-slate-900 text-xs">₹{s.starting_price}</p>
+                              </div>
+                            </div>
+                            
+                            <div className="flex gap-2">
+                              <button 
+                                onClick={() => navigateTo(`/salon/${s.id}`)} 
+                                className="flex-1 py-2 text-[10px] font-bold border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors cursor-pointer"
+                              >
+                                View Salon
+                              </button>
+                              <button 
+                                onClick={() => navigateTo(`/booking/${s.id}`)} 
+                                className="flex-1 py-2 text-[10px] font-bold bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all cursor-pointer"
+                              >
+                                Book Now
+                              </button>
+                            </div>
+                          </div>
+                      </div>
+                  ))}
+              </div>
+            ) : (
+              <div className="bg-white p-8 rounded-3xl border border-dashed border-slate-200 text-center flex flex-col items-center">
+                <div className="w-12 h-12 bg-rose-50 rounded-full flex items-center justify-center mb-3">
+                  <Heart className="w-6 h-6 text-rose-300" />
+                </div>
+                <p className="text-sm font-bold text-slate-900 mb-1">No saved salons yet</p>
+                <p className="text-[10px] text-slate-500 font-medium mb-4">Tap the heart icon on any salon to save it here.</p>
+                <button 
+                  onClick={() => navigateTo("/customer")}
+                  className="px-4 py-2 bg-blue-50 text-blue-600 rounded-xl text-xs font-bold hover:bg-blue-100 transition-colors"
+                >
+                  Find Salons
+                </button>
+              </div>
+            )}
         </div>
 
         {/* Account Options */}
