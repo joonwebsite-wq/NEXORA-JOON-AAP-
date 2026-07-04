@@ -54,14 +54,7 @@ const BookingDetails = ({ navigateTo, bookingId }: BookingDetailsProps) => {
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   
   // QR Payment & Settings States
-  const [qrSettings, setQrSettings] = useState<any>(null);
-  const [qrPayment, setQrPayment] = useState<any>(null);
-  const [amountPaid, setAmountPaid] = useState("");
-  const [paymentReference, setPaymentReference] = useState("");
-  const [screenshotFile, setScreenshotFile] = useState<File | null>(null);
-  const [isBucketAvailable, setIsBucketAvailable] = useState(true);
-  const [uploadingScreenshot, setUploadingScreenshot] = useState(false);
-  const [submittingPayment, setSubmittingPayment] = useState(false);
+  const [isPaying, setIsPaying] = useState(false);
 
   // Review state
   const [existingReview, setExistingReview] = useState<CustomerReview | null>(null);
@@ -127,16 +120,13 @@ const BookingDetails = ({ navigateTo, bookingId }: BookingDetailsProps) => {
       if (bookingError) throw bookingError;
       if (!bookingData) throw new Error("Booking not found");
       setBooking(bookingData);
-      setAmountPaid(bookingData.total_amount.toString());
 
       // 3. Fetch Related Data in Parallel
-      const [shopRes, staffRes, servicesRes, profileRes, qrSettingsRes, qrPaymentRes] = await Promise.all([
+      const [shopRes, staffRes, servicesRes, profileRes] = await Promise.all([
         supabase.from("shops").select("*").eq("id", bookingData.shop_id).single(),
         bookingData.staff_id ? supabase.from("shop_staff").select("*").eq("id", bookingData.staff_id).single() : Promise.resolve({ data: null, error: null }),
         supabase.from("customer_booking_services").select("*").eq("booking_id", bookingId),
-        supabase.from("profiles").select("*").eq("id", session.user.id).single(),
-        supabase.from("platform_qr_settings").select("*").eq("is_active", true).maybeSingle(),
-        supabase.from("qr_payment_records").select("*").eq("booking_id", bookingId).maybeSingle()
+        supabase.from("profiles").select("*").eq("id", session.user.id).single()
       ]);
 
       if (shopRes.error) throw shopRes.error;
@@ -147,13 +137,6 @@ const BookingDetails = ({ navigateTo, bookingId }: BookingDetailsProps) => {
       setStaff(staffRes.data);
       setServices(servicesRes.data || []);
       setCustomer(profileRes.data);
-      setQrSettings(qrSettingsRes?.data || null);
-      setQrPayment(qrPaymentRes?.data || null);
-
-      if (qrPaymentRes?.data) {
-        setAmountPaid(qrPaymentRes.data.gross_amount?.toString() || qrPaymentRes.data.amount?.toString() || bookingData.total_amount.toString());
-        setPaymentReference(qrPaymentRes.data.payment_reference || qrPaymentRes.data.reference_id || qrPaymentRes.data.utr || "");
-      }
 
       // 4. Check for existing review
       const { data: reviewData } = await supabase
@@ -238,97 +221,6 @@ const BookingDetails = ({ navigateTo, bookingId }: BookingDetailsProps) => {
       setMessage({ type: 'error', text: err.message || "Failed to submit review." });
     } finally {
       setSubmittingReview(false);
-    }
-  };
-
-  const handleSubmitPayment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!booking || !shop) return;
-    if (!paymentReference.trim()) {
-      setMessage({ type: 'error', text: "Payment reference / UTR is required." });
-      return;
-    }
-
-    setSubmittingPayment(true);
-    setMessage(null);
-
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        navigateTo("/login");
-        return;
-      }
-
-      // Check duplicate
-      const { data: existingPayment } = await supabase
-        .from("qr_payment_records")
-        .select("id")
-        .eq("booking_id", booking.id)
-        .maybeSingle();
-
-      if (existingPayment) {
-        setMessage({ type: 'error', text: "A payment record has already been submitted for this booking." });
-        setSubmittingPayment(false);
-        return;
-      }
-
-      let uploadedUrl = "";
-      if (screenshotFile && isBucketAvailable) {
-        setUploadingScreenshot(true);
-        try {
-          const fileExt = screenshotFile.name.split('.').pop();
-          const fileName = `${booking.id}-${Math.random().toString(36).substring(2)}.${fileExt}`;
-          const filePath = `${fileName}`;
-
-          const { error: uploadError } = await supabase.storage
-            .from("payment-proofs")
-            .upload(filePath, screenshotFile);
-
-          if (uploadError) {
-            console.error("Screenshot upload failed:", uploadError);
-          } else {
-            const { data: { publicUrl } } = supabase.storage
-              .from("payment-proofs")
-              .getPublicUrl(filePath);
-            uploadedUrl = publicUrl;
-          }
-        } catch (uploadErr) {
-          console.error("Screenshot upload try-catch failed:", uploadErr);
-        } finally {
-          setUploadingScreenshot(false);
-        }
-      }
-
-      const grossAmt = parseFloat(amountPaid) || booking.total_amount;
-
-      // Insert record
-      const { data: newPayment, error: insertError } = await supabase
-        .from("qr_payment_records")
-        .insert({
-          shop_id: booking.shop_id,
-          owner_id: shop.owner_id || null,
-          customer_id: session.user.id,
-          booking_id: booking.id,
-          gross_amount: grossAmt,
-          payment_reference: paymentReference,
-          payment_screenshot_url: uploadedUrl || null,
-          company_qr_used: true,
-          status: 'pending'
-        })
-        .select()
-        .single();
-
-      if (insertError) {
-        throw insertError;
-      }
-
-      setQrPayment(newPayment);
-      setMessage({ type: 'success', text: "Payment submitted for verification." });
-    } catch (err: any) {
-      console.error("Error submitting QR payment:", err);
-      setMessage({ type: 'error', text: "Unable to submit payment. Please try again." });
-    } finally {
-      setSubmittingPayment(false);
     }
   };
 
@@ -542,171 +434,15 @@ const BookingDetails = ({ navigateTo, bookingId }: BookingDetailsProps) => {
           </div>
         )}
 
-        {/* QR Payment Section */}
-        {((booking.status === 'pending' || booking.status === 'confirmed') || qrPayment) && (
-          <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-sm space-y-6">
-            <h4 className="font-bold text-slate-900 text-sm border-b border-slate-50 pb-4 flex items-center gap-2">
-              <QrCode className="w-5 h-5 text-blue-600" /> Pay with Nexora SalonOS QR
-            </h4>
-
-            {qrPayment ? (
-              // Existing Payment Record
-              <div className="space-y-4">
-                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 space-y-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase">Payment Status</span>
-                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border ${
-                      qrPayment.status === "verified" ? "bg-emerald-50 text-emerald-700 border-emerald-100" :
-                      qrPayment.status === "rejected" ? "bg-rose-50 text-rose-700 border-rose-100" :
-                      "bg-amber-50 text-amber-700 border-amber-100"
-                    }`}>
-                      {qrPayment.status || "pending"}
-                    </span>
-                  </div>
-
-                  {qrPayment.rejection_reason && (
-                    <div className="p-3 bg-rose-50 text-rose-800 text-xs rounded-xl border border-rose-100">
-                      <p className="font-bold">Rejection Reason:</p>
-                      <p className="font-medium mt-0.5">{qrPayment.rejection_reason}</p>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-200/60">
-                    <div>
-                      <span className="text-[9px] text-slate-400 font-bold uppercase block">Amount Paid</span>
-                      <span className="text-sm font-black text-slate-900">₹{qrPayment.gross_amount || qrPayment.amount || booking.total_amount}</span>
-                    </div>
-                    <div>
-                      <span className="text-[9px] text-slate-400 font-bold uppercase block">Reference / UTR</span>
-                      <span className="text-sm font-mono font-bold text-slate-900">{qrPayment.payment_reference || qrPayment.reference_id || qrPayment.utr}</span>
-                    </div>
-                  </div>
-
-                  {qrPayment.payment_screenshot_url && (
-                    <div className="pt-2">
-                      <a 
-                        href={qrPayment.payment_screenshot_url} 
-                        target="_blank" 
-                        rel="noreferrer"
-                        className="text-[10px] text-blue-600 hover:underline font-bold flex items-center gap-1 inline-flex"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" /> View Uploaded Screenshot
-                      </a>
-                    </div>
-                  )}
-                </div>
-
-                {qrPayment.status === "rejected" && (booking.status === "pending" || booking.status === "confirmed") && (
-                  <button
-                    onClick={() => setQrPayment(null)}
-                    className="w-full py-3 bg-slate-950 hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition cursor-pointer"
-                  >
-                    Submit New Payment Info
-                  </button>
-                )}
-              </div>
-            ) : qrSettings ? (
-              // Payment Submission Form
-              <form onSubmit={handleSubmitPayment} className="space-y-5">
-                <div className="flex flex-col items-center justify-center space-y-4">
-                  {qrSettings.qr_image_url ? (
-                    <div className="w-48 h-48 bg-slate-50 p-2 rounded-2xl border border-slate-200 flex items-center justify-center overflow-hidden">
-                      <img 
-                        src={qrSettings.qr_image_url} 
-                        alt="Nexora QR Code" 
-                        referrerPolicy="no-referrer"
-                        className="w-full h-full object-contain"
-                      />
-                    </div>
-                  ) : (
-                    <div className="w-48 h-48 bg-slate-50 rounded-2xl border border-slate-100 flex flex-col items-center justify-center p-4">
-                      <QrCode className="w-12 h-12 text-slate-400 mb-2 animate-pulse" />
-                      <span className="text-[10px] text-slate-400 font-bold">QR Image Missing</span>
-                    </div>
-                  )}
-
-                  <div className="text-center space-y-1">
-                    {qrSettings.payee_name && (
-                      <p className="text-xs font-black text-slate-900">Payee: {qrSettings.payee_name}</p>
-                    )}
-                    {qrSettings.upi_id && (
-                      <p className="text-xs font-mono bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg inline-block">
-                        UPI ID: {qrSettings.upi_id}
-                      </p>
-                    )}
-                  </div>
-
-                  <p className="text-[10px] text-amber-600 font-bold bg-amber-50 px-3 py-1.5 rounded-xl border border-amber-100/60 text-center w-full">
-                    ⚠️ Use only Nexora SalonOS company QR for payment.
-                  </p>
-                </div>
-
-                <div className="space-y-4 pt-2">
-                  <div className="space-y-1.5">
-                    <label className="block text-3xs font-black uppercase tracking-wider text-slate-400">Amount Paid (₹)</label>
-                    <input 
-                      required
-                      type="number"
-                      value={amountPaid}
-                      onChange={(e) => setAmountPaid(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs focus:ring-2 focus:ring-blue-600 outline-none transition font-semibold"
-                      placeholder="e.g. 500"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="block text-3xs font-black uppercase tracking-wider text-slate-400">Payment Reference / UTR</label>
-                    <input 
-                      required
-                      type="text"
-                      value={paymentReference}
-                      onChange={(e) => setPaymentReference(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs focus:ring-2 focus:ring-blue-600 outline-none transition font-semibold"
-                      placeholder="e.g. 12-digit UPI Transaction ID"
-                    />
-                  </div>
-
-                  {/* Screenshot Upload */}
-                  <div className="space-y-1.5 bg-slate-50 p-4 rounded-xl border border-slate-100">
-                    <label className="block text-3xs font-black uppercase tracking-wider text-slate-400">Payment Screenshot (Optional)</label>
-                    {isBucketAvailable ? (
-                      <div className="mt-1">
-                        <input 
-                          type="file" 
-                          accept="image/*"
-                          onChange={(e) => {
-                            if (e.target.files && e.target.files[0]) {
-                              setScreenshotFile(e.target.files[0]);
-                            }
-                          }}
-                          className="text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-                        />
-                      </div>
-                    ) : (
-                      <p className="text-[10px] text-slate-400 font-bold italic">Payment proof upload will be enabled soon.</p>
-                    )}
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={submittingPayment}
-                    className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-2xl text-xs transition shadow-lg shadow-slate-900/10 cursor-pointer disabled:opacity-50"
-                  >
-                    {submittingPayment ? "Submitting..." : "Submit Payment for Verification"}
-                  </button>
-                </div>
-              </form>
-            ) : (
-              <p className="text-xs text-slate-400 font-bold text-center py-4 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                Nexora QR Code setup is pending by Admin.
-              </p>
-            )}
-          </div>
-        )}
-
         {/* Actions */}
         {(booking.status === 'pending' || booking.status === 'confirmed') && (
             <div className="grid grid-cols-2 gap-4 pt-4">
+                <button
+                  className="col-span-2 flex items-center justify-center gap-2 py-4 px-6 bg-blue-600 text-white font-bold rounded-2xl text-sm shadow-xl shadow-blue-100 hover:bg-blue-700 transition"
+                  onClick={() => {/* TODO: Implement Razorpay checkout */}}
+                >
+                    Pay Now
+                </button>
                 {new Date(`${booking.booking_date}T${booking.booking_time}`).getTime() > new Date().getTime() && (
                     <button 
                       onClick={handleShare}
