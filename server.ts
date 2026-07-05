@@ -264,6 +264,15 @@ app.post("/api/razorpay/webhook", async (req, res) => {
             await supabase.rpc("process_referral_after_razorpay_payment", {
                 razorpay_payment_id: payment.id
             });
+
+            // Process partner commission
+            try {
+                await supabase.rpc("process_partner_commission_for_payment", {
+                    p_razorpay_payment_id: payment.id
+                });
+            } catch (partnerErr) {
+                console.error("Error processing partner commission for payment:", payment.id, partnerErr);
+            }
         } else if (event === "refund.processed") {
             const refund = req.body.payload.refund.entity;
             await supabase.rpc("record_razorpay_refund_success", {

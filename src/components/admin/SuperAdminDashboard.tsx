@@ -25,10 +25,12 @@ import {
   Settings,
   ShieldCheck,
   RefreshCw,
-  Award
+  Award,
+  Users
 } from "lucide-react";
 import FinanceControlCenter from "./finance/FinanceControlCenter";
 import ServerSecretDiagnostic from "./ServerSecretDiagnostic";
+import GrowthPartnersSection from "./GrowthPartnersSection";
 
 
 interface SuperAdminDashboardProps {
@@ -40,8 +42,8 @@ export default function SuperAdminDashboard({ navigateTo }: SuperAdminDashboardP
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
 
-  // Tabs: overview | approvals | qr_settings | qr_payments | referral_settings | membership_plans | finance
-  const [activeTab, setActiveTab] = useState<"overview" | "approvals" | "qr_settings" | "qr_payments" | "referral_settings" | "membership_plans" | "finance">("overview");
+  // Tabs: overview | approvals | qr_settings | qr_payments | referral_settings | membership_plans | finance | growth_partners
+  const [activeTab, setActiveTab] = useState<"overview" | "approvals" | "qr_settings" | "qr_payments" | "referral_settings" | "membership_plans" | "finance" | "growth_partners">("overview");
 
   // QR Payments state
   const [paymentRecords, setPaymentRecords] = useState<any[]>([]);
@@ -764,7 +766,8 @@ export default function SuperAdminDashboard({ navigateTo }: SuperAdminDashboardP
             { id: "qr_payments", label: `QR Payment Verification (${paymentRecords.filter(p => p.status === 'pending').length})`, icon: CheckCircle },
             { id: "referral_settings", label: "Referral Settings", icon: Sparkles },
             { id: "membership_plans", label: "Membership Plans", icon: Award },
-            { id: "finance", label: "Finance Control Center", icon: ShieldCheck }
+            { id: "finance", label: "Finance Control Center", icon: ShieldCheck },
+            { id: "growth_partners", label: "Growth Partners", icon: Users }
           ].map(tab => {
             const Icon = tab.icon;
             return (
@@ -1179,6 +1182,19 @@ export default function SuperAdminDashboard({ navigateTo }: SuperAdminDashboardP
         {/* Tab Finance Control Center */}
         {activeTab === "finance" && (
             <FinanceControlCenter />
+        )}
+
+        {/* Tab Growth Partners */}
+        {activeTab === "growth_partners" && (
+            <GrowthPartnersSection 
+              showNotification={(type, text) => {
+                if (type === "success") {
+                  setSuccessMessage(text);
+                } else {
+                  setErrorMessage(text);
+                }
+              }} 
+            />
         )}
 
       </main>

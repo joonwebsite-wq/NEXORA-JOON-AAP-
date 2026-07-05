@@ -41,6 +41,8 @@ import OwnerDashboardPlaceholder from "./components/owner/OwnerDashboardPlacehol
 import OwnerCreateWebsite from "./components/owner/OwnerCreateWebsite";
 import PublicShopWebsite from "./components/owner/PublicShopWebsite";
 import SuperAdminDashboard from "./components/admin/SuperAdminDashboard";
+import GrowthPartnerLanding from "./components/partner/GrowthPartnerLanding";
+import PartnerDashboard from "./components/partner/PartnerDashboard";
 import LoadingState from "./components/customer/LoadingState";
 import { supabase } from "./lib/supabase";
 import { Salon, Service } from "./types";
@@ -517,6 +519,44 @@ export default function App() {
       );
     }
     return <OwnerDashboardPlaceholder navigateTo={navigateTo} />;
+  }
+
+  if (currentPath === "/growth-partner") {
+    return <GrowthPartnerLanding navigateTo={navigateTo} />;
+  }
+
+  if (currentPath === "/partner-dashboard") {
+    if (!session) {
+      navigateTo("/login");
+      return null;
+    }
+    const hasPartnerRole = userRoles.includes("growth_partner") || userRoles.includes("super_admin");
+    if (!hasPartnerRole) {
+      return (
+        <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center font-sans">
+          <div className="max-w-md w-full bg-white p-8 rounded-3xl border border-slate-100 shadow-xl space-y-6">
+            <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center mx-auto border border-rose-100">
+              <LockIcon className="w-8 h-8" />
+            </div>
+            <h1 className="text-xl font-black text-slate-900">Partner Access Required</h1>
+            <p className="text-sm text-slate-500">Only approved Nexora Growth Partners can access this dashboard. Apply now to start your journey.</p>
+            <button 
+              onClick={() => navigateTo("/growth-partner")}
+              className="w-full py-4 bg-blue-600 text-white font-bold rounded-2xl text-sm shadow-lg hover:bg-blue-700 transition cursor-pointer"
+            >
+              Become a Growth Partner
+            </button>
+            <button 
+              onClick={() => navigateTo("/")}
+              className="w-full py-4 bg-slate-100 text-slate-700 font-bold rounded-2xl text-sm hover:bg-slate-200 transition cursor-pointer"
+            >
+              Back to Home
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return <PartnerDashboard navigateTo={navigateTo} />;
   }
 
   if (currentPath === "/owner-register") {
