@@ -28,6 +28,7 @@ import {
   Award
 } from "lucide-react";
 import FinanceControlCenter from "./finance/FinanceControlCenter";
+import ServerSecretDiagnostic from "./ServerSecretDiagnostic";
 
 
 interface SuperAdminDashboardProps {
@@ -96,6 +97,8 @@ export default function SuperAdminDashboard({ navigateTo }: SuperAdminDashboardP
 
   // Membership Plans
   const [membershipPlans, setMembershipPlans] = useState<any[]>([]);
+
+
 
   // Fetch roles and verify Super Admin
   useEffect(() => {
@@ -839,6 +842,9 @@ export default function SuperAdminDashboard({ navigateTo }: SuperAdminDashboardP
                 View Approvals Queue
               </button>
             </div>
+
+            {/* Server Secrets Diagnostic Component */}
+            <ServerSecretDiagnostic />
           </div>
         )}
 

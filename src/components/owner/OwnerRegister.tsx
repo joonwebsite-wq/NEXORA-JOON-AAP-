@@ -20,7 +20,7 @@ export default function OwnerRegister({ navigateTo }: OwnerRegisterProps) {
   const [email, setEmail] = useState("");
 
   const [shopName, setShopName] = useState("");
-  const [category, setCategory] = useState("Hair Salon");
+  const [category, setCategory] = useState("hair_salon");
   const [district, setDistrict] = useState("");
   const [city, setCity] = useState("");
   const [area, setArea] = useState("");
@@ -70,7 +70,7 @@ export default function OwnerRegister({ navigateTo }: OwnerRegisterProps) {
     setMobileNumber("");
     setEmail("");
     setShopName("");
-    setCategory("Hair Salon");
+    setCategory("hair_salon");
     setDistrict("");
     setCity("");
     setArea("");
@@ -663,13 +663,13 @@ export default function OwnerRegister({ navigateTo }: OwnerRegisterProps) {
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Business Category</label>
                 <select required value={category} onChange={e => setCategory(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-600 outline-none transition-all">
-                  <option>Hair Salon</option>
-                  <option>Beauty Parlour</option>
-                  <option>Barber Shop</option>
-                  <option>Spa Center</option>
-                  <option>Massage Center</option>
-                  <option>Tattoo Studio</option>
-                  <option>Nail Art Studio</option>
+                  <option value="hair_salon">Hair Salon</option>
+                  <option value="beauty_parlour">Beauty Parlour</option>
+                  <option value="barber">Barber Shop</option>
+                  <option value="spa">Spa Center</option>
+                  <option value="massage">Massage Center</option>
+                  <option value="tattoo">Tattoo Studio</option>
+                  <option value="nail_art">Nail Art Studio</option>
                 </select>
               </div>
               <div>

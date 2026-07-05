@@ -5,6 +5,7 @@ import { createServer as createViteServer } from "vite";
 import Razorpay from "razorpay";
 import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
+import { stringify } from "csv-stringify/sync";
 
 const app = express();
 app.use(express.json());
@@ -12,22 +13,44 @@ app.use(express.json());
 const PORT = 3000;
 
 // Initialize Supabase Admin Client
-if (!process.env.VITE_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-  throw new Error("Missing Supabase environment variables");
+const supabaseUrl = process.env.VITE_SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+if (!supabaseUrl) {
+  console.error("Missing required server secret: VITE_SUPABASE_URL");
+}
+if (!supabaseServiceKey) {
+  console.error("Missing required server secret: SUPABASE_SERVICE_ROLE_KEY");
 }
 const supabase = createClient(
-  process.env.VITE_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
+  supabaseUrl || "https://placeholder.supabase.co",
+  supabaseServiceKey || "placeholder-key"
 );
 
-// Initialize Razorpay
-if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
-  throw new Error("Missing Razorpay environment variables");
+// Initialize Razorpay lazily
+let razorpayClient: Razorpay | null = null;
+function getRazorpay(): Razorpay {
+  const keyId = process.env.RAZORPAY_KEY_ID;
+  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+  if (!keyId) {
+    console.error("Missing required server secret: RAZORPAY_KEY_ID");
+    throw new Error("Missing required server secret: RAZORPAY_KEY_ID");
+  }
+  if (!keySecret) {
+    console.error("Missing required server secret: RAZORPAY_KEY_SECRET");
+    throw new Error("Missing required server secret: RAZORPAY_KEY_SECRET");
+  }
+  if (!razorpayClient) {
+    razorpayClient = new Razorpay({
+      key_id: keyId,
+      key_secret: keySecret,
+    });
+  }
+  return razorpayClient;
 }
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET,
-});
+
+if (!process.env.RAZORPAY_WEBHOOK_SECRET) {
+  console.error("Missing required server secret: RAZORPAY_WEBHOOK_SECRET");
+}
 
 // API routes
 app.post("/api/razorpay/create-order", async (req, res) => {
@@ -89,7 +112,7 @@ app.post("/api/razorpay/create-order", async (req, res) => {
         final_payable_amount = Math.max(1, amount_after_membership - reward_to_redeem);
     }
 
-    const order = await razorpay.orders.create({
+    const order = await getRazorpay().orders.create({
       amount: final_payable_amount * 100, // INR in paise
       currency: "INR",
       receipt: `receipt_${booking_id}`,
@@ -171,7 +194,11 @@ app.post("/api/razorpay/verify-payment", async (req, res) => {
         if (booking.customer_id !== user.id) return res.status(403).send("Forbidden");
         
         // Verify signature
-        const secret = process.env.RAZORPAY_KEY_SECRET!;
+        const secret = process.env.RAZORPAY_KEY_SECRET;
+        if (!secret) {
+            console.error("Missing required server secret: RAZORPAY_KEY_SECRET");
+            return res.status(500).json({ error: "RAZORPAY_KEY_SECRET is not configured" });
+        }
         const text = razorpay_order_id + "|" + razorpay_payment_id;
         const shasum = crypto.createHmac("sha256", secret);
         shasum.update(text);
@@ -189,62 +216,23 @@ app.post("/api/razorpay/verify-payment", async (req, res) => {
     }
 });
 
-app.post("/api/razorpay/process-refund", async (req, res) => {
-    const { refund_request_id } = req.body;
-    const authHeader = req.headers.authorization;
-    if (!authHeader) return res.status(401).send("Unauthorized");
-    
-    try {
-        const token = authHeader.split(' ')[1];
-        const { data: { user } } = await supabase.auth.getUser(token);
-        if (!user) return res.status(401).send("Unauthorized");
-        
-        // Verify admin
-        const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
-        if (profile?.role !== 'super_admin') return res.status(403).send("Forbidden");
-        
-        // Fetch request
-        const { data: request } = await supabase.from("payment_refund_requests").select("*").eq("id", refund_request_id).single();
-        if (request.status !== 'approved') return res.status(400).send("Refund not approved");
-        
-        // Fetch payment
-        const { data: payment } = await supabase.from("razorpay_payments").select("*").eq("razorpay_payment_id", request.razorpay_payment_id).single();
-        if (!payment) return res.status(404).send("Payment not found");
-        
-        // Call Razorpay API
-        const razorpay = new Razorpay({
-            key_id: process.env.RAZORPAY_KEY_ID!,
-            key_secret: process.env.RAZORPAY_KEY_SECRET!
-        });
-        
-        const razorpayRefund = await razorpay.payments.refund(payment.razorpay_payment_id, {
-            amount: request.approved_amount * 100, // paise
-            notes: {
-                refund_request_id,
-                booking_id: request.booking_id,
-                shop_id: request.shop_id,
-                owner_id: request.owner_id
-            }
-        });
-        
-        // Mark processing
-        await supabase.rpc("service_mark_refund_processing", { p_refund_request_id: refund_request_id });
-        
-        res.json({ success: true, razorpay_refund_id: razorpayRefund.id });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Failed to process refund" });
-    }
-});
-
 app.post("/api/razorpay/webhook", async (req, res) => {
     // Verify signature
-    const secret = process.env.RAZORPAY_WEBHOOK_SECRET!;
+    const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+    if (!secret) {
+        console.error("Missing required server secret: RAZORPAY_WEBHOOK_SECRET");
+        return res.status(500).json({ error: "RAZORPAY_WEBHOOK_SECRET is not configured" });
+    }
+    const signature = req.headers["x-razorpay-signature"];
+    if (!signature) {
+        console.error("Missing x-razorpay-signature header");
+        return res.status(400).json({ error: "Missing x-razorpay-signature header" });
+    }
     const shasum = crypto.createHmac("sha256", secret);
     shasum.update(JSON.stringify(req.body));
     const digest = shasum.digest("hex");
 
-    if (digest === req.headers["x-razorpay-signature"]) {
+    if (digest === signature) {
         const event = req.body.event;
         if (event === "payment.captured") {
             const payment = req.body.payload.payment.entity;
@@ -324,7 +312,7 @@ app.post("/api/razorpay/process-refund", async (req, res) => {
 
         // Razorpay refund
         const razorpay_payment_id = refundRequest.booking.razorpay_payment_id;
-        const refund = await razorpay.payments.refund(razorpay_payment_id, {
+        const refund = await getRazorpay().payments.refund(razorpay_payment_id, {
             amount: refundRequest.approved_amount * 100, // paise
             notes: {
                 refund_request_id,
@@ -343,6 +331,32 @@ app.post("/api/razorpay/process-refund", async (req, res) => {
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: "Failed to process refund" });
+    }
+});
+
+app.get("/api/admin/diagnose-secrets", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).send("Unauthorized");
+    
+    try {
+        const token = authHeader.split(' ')[1];
+        const { data: { user } } = await supabase.auth.getUser(token);
+        if (!user) return res.status(401).send("Unauthorized");
+        
+        // Verify admin
+        const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+        if (profile?.role !== 'super_admin') return res.status(403).send("Forbidden");
+        
+        res.json({
+            RAZORPAY_KEY_ID: !!process.env.RAZORPAY_KEY_ID,
+            RAZORPAY_KEY_SECRET: !!process.env.RAZORPAY_KEY_SECRET,
+            RAZORPAY_WEBHOOK_SECRET: !!process.env.RAZORPAY_WEBHOOK_SECRET,
+            VITE_SUPABASE_URL: !!process.env.VITE_SUPABASE_URL,
+            SUPABASE_SERVICE_ROLE_KEY: !!process.env.SUPABASE_SERVICE_ROLE_KEY
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Failed to run secrets diagnostic" });
     }
 });
 
