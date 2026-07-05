@@ -26,6 +26,8 @@ import {
   ShieldCheck,
   RefreshCw
 } from "lucide-react";
+import FinanceControlCenter from "./finance/FinanceControlCenter";
+
 
 interface SuperAdminDashboardProps {
   navigateTo: (path: string) => void;
@@ -36,8 +38,8 @@ export default function SuperAdminDashboard({ navigateTo }: SuperAdminDashboardP
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
 
-  // Tabs: overview | approvals | qr_settings | qr_payments | referral_settings | membership_plans
-  const [activeTab, setActiveTab] = useState<"overview" | "approvals" | "qr_settings" | "qr_payments" | "referral_settings" | "membership_plans">("overview");
+  // Tabs: overview | approvals | qr_settings | qr_payments | referral_settings | membership_plans | finance
+  const [activeTab, setActiveTab] = useState<"overview" | "approvals" | "qr_settings" | "qr_payments" | "referral_settings" | "membership_plans" | "finance">("overview");
 
   // QR Payments state
   const [paymentRecords, setPaymentRecords] = useState<any[]>([]);
@@ -746,7 +748,8 @@ export default function SuperAdminDashboard({ navigateTo }: SuperAdminDashboardP
             { id: "qr_settings", label: "Nexora QR Settings", icon: QrCode },
             { id: "qr_payments", label: `QR Payment Verification (${paymentRecords.filter(p => p.status === 'pending').length})`, icon: CheckCircle },
             { id: "referral_settings", label: "Referral Settings", icon: Sparkles },
-            { id: "membership_plans", label: "Membership Plans", icon: Award }
+            { id: "membership_plans", label: "Membership Plans", icon: Award },
+            { id: "finance", label: "Finance Control Center", icon: ShieldCheck }
           ].map(tab => {
             const Icon = tab.icon;
             return (
@@ -1153,6 +1156,11 @@ export default function SuperAdminDashboard({ navigateTo }: SuperAdminDashboardP
                     ))}
                 </div>
             </div>
+        )}
+
+        {/* Tab Finance Control Center */}
+        {activeTab === "finance" && (
+            <FinanceControlCenter />
         )}
 
       </main>

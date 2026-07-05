@@ -202,6 +202,54 @@ app.post("/api/razorpay/webhook", async (req, res) => {
     }
 });
 
+app.post("/api/razorpay/process-refund", async (req, res) => {
+    const { refund_request_id } = req.body;
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader) return res.status(401).send("Unauthorized");
+
+    try {
+        const token = authHeader.split(' ')[1];
+        const { data: { user } } = await supabase.auth.getUser(token);
+        if (!user) return res.status(401).send("Unauthorized");
+
+        // Verify admin
+        const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+        if (profile?.role !== 'super_admin') return res.status(403).send("Forbidden");
+
+        // Fetch refund request
+        const { data: refundRequest } = await supabase
+            .from("payment_refund_requests")
+            .select("*, booking:customer_bookings(*)")
+            .eq("id", refund_request_id)
+            .single();
+
+        if (!refundRequest || refundRequest.status !== 'approved') return res.status(400).send("Invalid refund request");
+
+        // Razorpay refund
+        const razorpay_payment_id = refundRequest.booking.razorpay_payment_id;
+        const refund = await razorpay.payments.refund(razorpay_payment_id, {
+            amount: refundRequest.approved_amount * 100, // paise
+            notes: {
+                refund_request_id,
+                booking_id: refundRequest.booking_id,
+            }
+        });
+
+        // Mark processing
+        await supabase.rpc("service_mark_refund_processing", {
+            p_refund_request_id: refund_request_id,
+            p_razorpay_refund_id: refund.id,
+            p_raw_payload: refund
+        });
+
+        res.json({ success: true, refund_id: refund.id });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Failed to process refund" });
+    }
+});
+
 // ... existing routes ...
 
 app.post("/api/owner/payout-account", async (req, res) => {
