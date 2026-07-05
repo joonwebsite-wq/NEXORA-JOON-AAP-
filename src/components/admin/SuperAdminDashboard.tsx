@@ -24,7 +24,8 @@ import {
   Eye,
   Settings,
   ShieldCheck,
-  RefreshCw
+  RefreshCw,
+  Award
 } from "lucide-react";
 import FinanceControlCenter from "./finance/FinanceControlCenter";
 
@@ -668,7 +669,18 @@ export default function SuperAdminDashboard({ navigateTo }: SuperAdminDashboardP
             <Lock className="w-8 h-8" />
           </div>
           <h1 className="text-xl font-black text-slate-900">Access Denied</h1>
-          <p className="text-sm text-slate-500">Access denied. Super admin only.</p>
+          <p className="text-sm text-slate-500">
+            Super admin access required.
+          </p>
+
+          {/* TEMP_ADMIN_DEBUG_REMOVE_LATER */}
+          <div className="p-4 bg-slate-50 rounded-xl text-[10px] text-slate-500 text-left font-mono mt-4">
+             Email: {currentUser?.email || "N/A"}
+             <br/>
+             User ID: {currentUser?.id || "N/A"}
+             <br/><br/>
+             Ask database admin to add this user id/email to public.user_roles with role super_admin.
+          </div>
           <button 
             onClick={() => navigateTo("/")}
             className="w-full py-4 bg-blue-600 text-white font-bold rounded-2xl text-sm shadow-lg hover:bg-blue-700 transition cursor-pointer"

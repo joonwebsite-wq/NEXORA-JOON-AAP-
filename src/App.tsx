@@ -48,6 +48,7 @@ import { dispatchPopState } from "./utils/navigation";
 import {
   Sparkles,
   ShieldCheck,
+  Lock,
   HelpCircle,
   ChevronDown,
   Gift,
@@ -84,6 +85,8 @@ export default function App() {
   const [session, setSession] = useState<any>(null);
   const [userProfile, setUserProfile] = useState<any>(null);
   const [userRoles, setUserRoles] = useState<string[]>([]);
+  const [isSuperAdmin, setIsSuperAdmin] = useState<boolean | null>(null);
+  const [rpcError, setRpcError] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [benefitsFilter, setBenefitsFilter] = useState('All');
 
@@ -148,8 +151,25 @@ export default function App() {
       }
 
       setUserRoles(existingRoles);
-    } catch (err) {
+      
+      // 3. Check super_admin status
+      const { data: hasRole, error: rpcError } = await supabase.rpc("current_user_has_role", {
+        p_role: "super_admin"
+      });
+      if (rpcError) {
+        console.error("RPC current_user_has_role failed, falling back:", rpcError);
+        setRpcError(rpcError.message);
+        // Fallback: check existingRoles directly
+        const isSuperAdminFallback = existingRoles.includes('super_admin');
+        setIsSuperAdmin(isSuperAdminFallback);
+      } else {
+        setRpcError(null);
+        setIsSuperAdmin(!!hasRole);
+      }
+    } catch (err: any) {
       console.error("Error fetching profile and roles:", err);
+      setRpcError(err.message || "Unknown error");
+      setIsSuperAdmin(false);
     } finally {
       setAuthLoading(false);
     }
@@ -406,6 +426,49 @@ export default function App() {
       navigateTo("/login");
       return null;
     }
+    
+    if (isSuperAdmin === null) {
+      return (
+        <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 text-center font-sans">
+          <p className="text-sm text-slate-500">Checking admin access...</p>
+        </div>
+      );
+    }
+    
+    if (!isSuperAdmin) {
+      return (
+        <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center font-sans">
+          <div className="max-w-md w-full bg-white p-8 rounded-3xl border border-slate-100 shadow-xl space-y-6">
+            <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center mx-auto border border-rose-100">
+              <LockIcon className="w-8 h-8" />
+            </div>
+            <h1 className="text-xl font-black text-slate-900">Access Denied</h1>
+            <p className="text-sm text-slate-500">
+              Super admin access required.
+            </p>
+            
+            {/* TEMP_ADMIN_DEBUG_REMOVE_LATER */}
+            <div className="p-4 bg-slate-50 rounded-xl text-[10px] text-slate-500 text-left font-mono mt-4">
+               Email: {session.user?.email || "N/A"}
+               <br/>
+               User ID: {session.user?.id || "N/A"}
+               <br/>
+               RPC Error: {rpcError || "None"}
+               <br/><br/>
+               Ask database admin to add this user id/email to public.user_roles with role super_admin.
+            </div>
+            
+            <button 
+              onClick={() => navigateTo("/")}
+              className="w-full py-4 bg-blue-600 text-white font-bold rounded-2xl text-sm shadow-lg hover:bg-blue-700 transition cursor-pointer"
+            >
+              Back to Home
+            </button>
+          </div>
+        </div>
+      );
+    }
+    
     return <SuperAdminDashboard navigateTo={navigateTo} />;
   }
 

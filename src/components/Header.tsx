@@ -187,6 +187,13 @@ export default function Header({ onOpenModal, activeSection, onNavigateSection }
 
             {/* Desktop CTA Buttons */}
             <div className="hidden md:flex items-center gap-3">
+              {/* TEMP_ADMIN_TEST_BUTTON_REMOVE_LATER */}
+              <button
+                onClick={() => handleRouteNavigate("/admin")}
+                className="px-3 py-2 rounded-xl text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 transition-all cursor-pointer"
+              >
+                Admin Panel
+              </button>
               {session ? (
                 <div className="relative">
                   <button
@@ -388,6 +395,13 @@ export default function Header({ onOpenModal, activeSection, onNavigateSection }
                   <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
                 </button>
               ))}
+              {/* TEMP_ADMIN_TEST_BUTTON_REMOVE_LATER */}
+              <button
+                onClick={() => handleRouteNavigate("/admin")}
+                className="w-full text-left px-3 py-2.5 rounded-xl text-sm font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 transition-all cursor-pointer"
+              >
+                Admin Panel
+              </button>
             </div>
 
             <div className="pt-4 border-t border-slate-100 flex flex-col gap-2">

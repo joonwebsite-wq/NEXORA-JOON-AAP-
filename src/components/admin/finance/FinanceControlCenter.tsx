@@ -11,7 +11,9 @@ type FinanceTabKey =
   | "reward_redemptions"
   | "referral_rewards"
   | "membership_discounts"
-  | "audit_logs";
+  | "audit_logs"
+  | "refund_disputes"
+  | "finance_exports";
 
 type LoadState = "idle" | "loading" | "success" | "error";
 type FinanceSummary = Record<string, any>;
@@ -26,10 +28,12 @@ const financeTabs: { key: FinanceTabKey; label: string; description: string }[] 
   { key: "reward_redemptions", label: "Reward Redemptions", description: "Reward balance used by customers against bookings." },
   { key: "referral_rewards", label: "Referral Rewards", description: "Referral events, qualification and reward status." },
   { key: "membership_discounts", label: "Membership Discounts", description: "Silver, Gold, Platinum plans and discount usage." },
+  { key: "refund_disputes", label: "Refunds & Disputes", description: "Refund requests and dispute management." },
+  { key: "finance_exports", label: "Finance Exports", description: "Manage and download finance CSV exports." },
   { key: "audit_logs", label: "Audit Logs", description: "Append-only finance audit activity." },
 ];
 
-const tableMap: Record<Exclude<FinanceTabKey, "overview">, string> = {
+const tableMap: Record<Exclude<FinanceTabKey, "overview" | "finance_exports">, string> = {
   razorpay_orders: "razorpay_orders",
   razorpay_payments: "razorpay_payments",
   owner_wallets: "owner_wallets",
@@ -38,6 +42,7 @@ const tableMap: Record<Exclude<FinanceTabKey, "overview">, string> = {
   reward_redemptions: "customer_reward_redemptions",
   referral_rewards: "customer_referral_events",
   membership_discounts: "customer_membership_usage",
+  refund_disputes: "payment_refund_requests",
   audit_logs: "finance_audit_logs",
 };
 
@@ -131,6 +136,17 @@ const tableColumns: Record<FinanceTabKey, string[]> = {
     "discount_amount",
     "final_amount",
   ],
+  refund_disputes: [
+    "created_at",
+    "booking_id",
+    "reason",
+    "requested_amount",
+    "approved_amount",
+    "status",
+    "customer_note",
+    "actions",
+  ],
+  finance_exports: [],
   audit_logs: [
     "created_at",
     "event_type",
@@ -144,41 +160,9 @@ const tableColumns: Record<FinanceTabKey, string[]> = {
   ],
 };
 
-function formatMoney(value: any) {
-  const numberValue = Number(value || 0);
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 2,
-  }).format(numberValue);
-}
-
-function formatValue(value: any) {
-  if (value === null || value === undefined || value === "") return "—";
-  if (typeof value === "boolean") return value ? "Yes" : "No";
-  if (typeof value === "number") return value.toLocaleString("en-IN");
-  if (typeof value === "object") return JSON.stringify(value);
-  if (typeof value === "string" && value.length > 42) return `${value.slice(0, 18)}...${value.slice(-10)}`;
-  return value;
-}
-
-function StatusBadge({ value }: { value?: any }) {
-  const text = String(value || "unknown");
-  const tone =
-    text.includes("paid") || text.includes("captured") || text.includes("active") || text.includes("rewarded")
-      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-      : text.includes("failed") || text.includes("rejected") || text.includes("cancelled")
-        ? "bg-red-50 text-red-700 border-red-200"
-        : text.includes("pending") || text.includes("processing") || text.includes("eligible")
-          ? "bg-amber-50 text-amber-700 border-amber-200"
-          : "bg-slate-50 text-slate-700 border-slate-200";
-
-  return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${tone}`}>
-      {text}
-    </span>
-  );
-}
+import { DataTable, StatusBadge, formatMoney, formatValue } from "./FinanceDataTable";
+import { FinanceExportsTab } from "./FinanceExportsTab";
+import { RefundsDisputesPanel } from "./RefundsDisputesPanel";
 
 function KpiCard({ label, value, helper }: { label: string; value: React.ReactNode; helper?: string }) {
   return (
@@ -186,68 +170,6 @@ function KpiCard({ label, value, helper }: { label: string; value: React.ReactNo
       <p className="text-sm font-medium text-slate-500">{label}</p>
       <div className="mt-2 text-2xl font-bold text-slate-950">{value}</div>
       {helper ? <p className="mt-2 text-xs text-slate-500">{helper}</p> : null}
-    </div>
-  );
-}
-
-function DataTable({
-  rows,
-  columns,
-  emptyText,
-}: {
-  rows: Record<string, any>[];
-  columns: string[];
-  emptyText: string;
-}) {
-  if (!rows.length) {
-    return (
-      <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
-        {emptyText}
-      </div>
-    );
-  }
-
-  return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-slate-200 text-sm">
-          <thead className="bg-slate-50">
-            <tr>
-              {columns.map((column) => (
-                <th
-                  key={column}
-                  className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500"
-                >
-                  {column.replaceAll("_", " ")}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {rows.map((row, index) => (
-              <tr key={row.id || index} className="hover:bg-slate-50">
-                {columns.map((column) => (
-                  <td key={column} className="whitespace-nowrap px-4 py-3 text-slate-700">
-                    {column === "status" || column.endsWith("_status") || column === "event_type" ? (
-                      <StatusBadge value={row[column]} />
-                    ) : column.includes("amount") ||
-                      column.includes("balance") ||
-                      column === "total_earned" ||
-                      column === "total_paid_out" ||
-                      column === "gross_amount" ||
-                      column === "final_amount" ||
-                      column === "payout_amount" ? (
-                      formatMoney(row[column])
-                    ) : (
-                      formatValue(row[column])
-                    )}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
     </div>
   );
 }
@@ -311,6 +233,28 @@ export default function FinanceControlCenter() {
   const [message, setMessage] = useState("");
   const [rows, setRows] = useState<Record<string, any>[]>([]);
   const [summary, setSummary] = useState<FinanceSummary | null>(null);
+  const [processingRefunds, setProcessingRefunds] = useState<Record<string, boolean>>({});
+
+  const handleProcessRefund = async (refundId: string) => {
+      setProcessingRefunds(prev => ({ ...prev, [refundId]: true }));
+      try {
+          const { data: { session } } = await supabase.auth.getSession();
+          const response = await fetch('/api/razorpay/process-refund', {
+              method: 'POST',
+              headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${session?.access_token}`
+              },
+              body: JSON.stringify({ refund_request_id: refundId })
+          });
+          if (!response.ok) throw new Error('Failed to process refund');
+          window.location.reload(); 
+      } catch (err) {
+          alert('Failed to process refund');
+      } finally {
+          setProcessingRefunds(prev => ({ ...prev, [refundId]: false }));
+      }
+  };
 
   const activeTabInfo = useMemo(
     () => financeTabs.find((tab) => tab.key === activeTab) || financeTabs[0],
@@ -344,7 +288,12 @@ export default function FinanceControlCenter() {
         return;
       }
 
-      const tableName = tableMap[activeTab];
+      if (activeTab === "finance_exports") {
+        setDataState("success");
+        return;
+      }
+
+      const tableName = tableMap[activeTab as Exclude<FinanceTabKey, "overview" | "finance_exports">];
       const orderColumn =
         activeTab === "daily_settlements"
           ? "created_at"
@@ -429,8 +378,16 @@ export default function FinanceControlCenter() {
 
         {activeTab === "overview" ? (
           <OverviewPanel summary={summary} />
+        ) : activeTab === "finance_exports" ? (
+          <FinanceExportsTab />
+        ) : activeTab === "refund_disputes" ? (
+          <RefundsDisputesPanel />
         ) : (
-          <DataTable rows={rows} columns={columns} emptyText={`No records found for ${activeTabInfo.label}.`} />
+          <DataTable 
+            rows={rows} 
+            columns={columns} 
+            emptyText={`No records found for ${activeTabInfo.label}.`}
+          />
         )}
       </div>
     </div>

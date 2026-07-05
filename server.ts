@@ -156,6 +156,87 @@ app.post("/api/razorpay/remove-reward", async (req, res) => {
     }
 });
 
+app.post("/api/razorpay/verify-payment", async (req, res) => {
+    const { booking_id, razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).send("Unauthorized");
+    
+    try {
+        const token = authHeader.split(' ')[1];
+        const { data: { user } } = await supabase.auth.getUser(token);
+        if (!user) return res.status(401).send("Unauthorized");
+        
+        // Verify booking owner
+        const { data: booking } = await supabase.from("customer_bookings").select("*").eq("id", booking_id).single();
+        if (booking.customer_id !== user.id) return res.status(403).send("Forbidden");
+        
+        // Verify signature
+        const secret = process.env.RAZORPAY_KEY_SECRET!;
+        const text = razorpay_order_id + "|" + razorpay_payment_id;
+        const shasum = crypto.createHmac("sha256", secret);
+        shasum.update(text);
+        const digest = shasum.digest("hex");
+        
+        if (digest === razorpay_signature) {
+            res.json({ payment_verified: true });
+        } else {
+             await supabase.from("customer_bookings").update({ payment_status: 'failed' }).eq("id", booking_id);
+             res.status(400).json({ error: "Invalid signature" });
+        }
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Failed to verify payment" });
+    }
+});
+
+app.post("/api/razorpay/process-refund", async (req, res) => {
+    const { refund_request_id } = req.body;
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).send("Unauthorized");
+    
+    try {
+        const token = authHeader.split(' ')[1];
+        const { data: { user } } = await supabase.auth.getUser(token);
+        if (!user) return res.status(401).send("Unauthorized");
+        
+        // Verify admin
+        const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+        if (profile?.role !== 'super_admin') return res.status(403).send("Forbidden");
+        
+        // Fetch request
+        const { data: request } = await supabase.from("payment_refund_requests").select("*").eq("id", refund_request_id).single();
+        if (request.status !== 'approved') return res.status(400).send("Refund not approved");
+        
+        // Fetch payment
+        const { data: payment } = await supabase.from("razorpay_payments").select("*").eq("razorpay_payment_id", request.razorpay_payment_id).single();
+        if (!payment) return res.status(404).send("Payment not found");
+        
+        // Call Razorpay API
+        const razorpay = new Razorpay({
+            key_id: process.env.RAZORPAY_KEY_ID!,
+            key_secret: process.env.RAZORPAY_KEY_SECRET!
+        });
+        
+        const razorpayRefund = await razorpay.payments.refund(payment.razorpay_payment_id, {
+            amount: request.approved_amount * 100, // paise
+            notes: {
+                refund_request_id,
+                booking_id: request.booking_id,
+                shop_id: request.shop_id,
+                owner_id: request.owner_id
+            }
+        });
+        
+        // Mark processing
+        await supabase.rpc("service_mark_refund_processing", { p_refund_request_id: refund_request_id });
+        
+        res.json({ success: true, razorpay_refund_id: razorpayRefund.id });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Failed to process refund" });
+    }
+});
+
 app.post("/api/razorpay/webhook", async (req, res) => {
     // Verify signature
     const secret = process.env.RAZORPAY_WEBHOOK_SECRET!;
@@ -194,6 +275,21 @@ app.post("/api/razorpay/webhook", async (req, res) => {
             // Process referral
             await supabase.rpc("process_referral_after_razorpay_payment", {
                 razorpay_payment_id: payment.id
+            });
+        } else if (event === "refund.processed") {
+            const refund = req.body.payload.refund.entity;
+            await supabase.rpc("record_razorpay_refund_success", {
+                razorpay_refund_id: refund.id,
+                razorpay_payment_id: refund.payment_id,
+                refund_amount_in_rupees: refund.amount / 100,
+                raw_payload: req.body.payload
+            });
+        } else if (event === "refund.failed") {
+            const refund = req.body.payload.refund.entity;
+            await supabase.rpc("record_razorpay_refund_failed", {
+                razorpay_refund_id: refund.id,
+                failure_reason: refund.error_description || 'Unknown',
+                raw_payload: req.body.payload
             });
         }
         res.json({ status: "ok" });
@@ -247,6 +343,101 @@ app.post("/api/razorpay/process-refund", async (req, res) => {
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: "Failed to process refund" });
+    }
+});
+
+app.post("/api/process-finance-export", async (req, res) => {
+    const { export_request_id } = req.body;
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).send("Unauthorized");
+    
+    try {
+        const token = authHeader.split(' ')[1];
+        const { data: { user } } = await supabase.auth.getUser(token);
+        if (!user) return res.status(401).send("Unauthorized");
+        
+        // Verify admin
+        const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+        if (profile?.role !== 'super_admin') return res.status(403).send("Forbidden");
+        
+        // Mark processing
+        await supabase.rpc("service_mark_finance_export_processing", { p_export_request_id: export_request_id });
+        
+        // Get request
+        const { data: request } = await supabase.from("finance_export_requests").select("*").eq("id", export_request_id).single();
+        
+        // Fetch data based on type
+        let data: any[] = [];
+        const tableMap: Record<string, string> = {
+            razorpay_orders: "razorpay_orders",
+            razorpay_payments: "razorpay_payments",
+            owner_wallets: "owner_wallets",
+            daily_settlements: "owner_daily_settlements",
+            customer_rewards: "customer_reward_wallets",
+            reward_redemptions: "customer_reward_redemptions",
+            referral_rewards: "customer_referral_events",
+            membership_discounts: "customer_membership_usage",
+            refunds: "payment_refunds",
+            audit_logs: "finance_audit_logs",
+        };
+        const tableName = tableMap[request.export_type];
+        
+        if (tableName) {
+            let query = supabase.from(tableName).select("*");
+            if (request.start_date) query = query.gte("created_at", request.start_date);
+            if (request.end_date) query = query.lte("created_at", request.end_date);
+            const { data: fetchedData } = await query;
+            data = fetchedData || [];
+        }
+        
+        // Generate CSV
+        const csv = stringify(data, { header: true });
+        const storagePath = `finance/${request.export_type}/${new Date().getFullYear()}/${new Date().getMonth() + 1}/${export_request_id}.csv`;
+        
+        // Upload
+        await supabase.storage.from('finance-exports').upload(storagePath, csv, { contentType: 'text/csv' });
+        
+        // Mark completed
+        await supabase.rpc("service_mark_finance_export_completed", {
+            p_export_request_id: export_request_id,
+            p_storage_path: storagePath,
+            p_file_name: `nexora-${request.export_type}-${new Date().toISOString().slice(0, 10)}.csv`,
+            p_row_count: data.length,
+            p_file_size_bytes: Buffer.byteLength(csv),
+            p_mime_type: 'text/csv'
+        });
+        
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        await supabase.rpc("service_mark_finance_export_failed", { p_export_request_id: export_request_id, p_error_message: 'Failed to process export' });
+        res.status(500).json({ error: "Failed to process export" });
+    }
+});
+
+app.post("/api/get-finance-export-download-url", async (req, res) => {
+    const { export_request_id } = req.body;
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).send("Unauthorized");
+    
+    try {
+        const token = authHeader.split(' ')[1];
+        const { data: { user } } = await supabase.auth.getUser(token);
+        if (!user) return res.status(401).send("Unauthorized");
+        
+        // Verify admin
+        const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+        if (profile?.role !== 'super_admin') return res.status(403).send("Forbidden");
+        
+        const { data: request } = await supabase.from("finance_export_requests").select("*").eq("id", export_request_id).single();
+        if (request.status !== 'completed') return res.status(400).send("Export not completed");
+        
+        const { data: { signedUrl } } = await supabase.storage.from('finance-exports').createSignedUrl(request.storage_path, 300);
+        
+        res.json({ signed_url: signedUrl, file_name: request.file_name, expires_in: 300 });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Failed to get download URL" });
     }
 });
 
