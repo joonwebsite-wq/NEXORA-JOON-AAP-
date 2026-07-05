@@ -36,8 +36,8 @@ export default function SuperAdminDashboard({ navigateTo }: SuperAdminDashboardP
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
 
-  // Tabs: overview | approvals | qr_settings | qr_payments
-  const [activeTab, setActiveTab] = useState<"overview" | "approvals" | "qr_settings" | "qr_payments">("overview");
+  // Tabs: overview | approvals | qr_settings | qr_payments | referral_settings | membership_plans
+  const [activeTab, setActiveTab] = useState<"overview" | "approvals" | "qr_settings" | "qr_payments" | "referral_settings" | "membership_plans">("overview");
 
   // QR Payments state
   const [paymentRecords, setPaymentRecords] = useState<any[]>([]);
@@ -88,6 +88,12 @@ export default function SuperAdminDashboard({ navigateTo }: SuperAdminDashboardP
   const [savingQr, setSavingQr] = useState(false);
   const [qrMessage, setQrMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
+  // Referral Settings
+  const [referralSettings, setReferralSettings] = useState<any>(null);
+
+  // Membership Plans
+  const [membershipPlans, setMembershipPlans] = useState<any[]>([]);
+
   // Fetch roles and verify Super Admin
   useEffect(() => {
     async function checkAdminAccess() {
@@ -129,8 +135,28 @@ export default function SuperAdminDashboard({ navigateTo }: SuperAdminDashboardP
       fetchAllDashboardData();
       fetchQrSettings();
       fetchPaymentRecords();
+      fetchReferralSettings();
+      fetchMembershipPlans();
     }
   }, [isAdmin]);
+
+  const fetchMembershipPlans = async () => {
+    try {
+        const { data } = await supabase.from("membership_plans").select("*").order("min_lifetime_points", { ascending: true });
+        if (data) setMembershipPlans(data);
+    } catch (err) {
+        console.error("Error fetching membership plans:", err);
+    }
+  };
+
+  const fetchReferralSettings = async () => {
+    try {
+        const { data } = await supabase.from("referral_reward_settings").select("*").single();
+        if (data) setReferralSettings(data);
+    } catch (err) {
+        console.error("Error fetching referral settings:", err);
+    }
+  };
 
   const fetchAllDashboardData = async () => {
     setLoadingShops(true);
@@ -718,7 +744,9 @@ export default function SuperAdminDashboard({ navigateTo }: SuperAdminDashboardP
             { id: "overview", label: "Overview", icon: Globe },
             { id: "approvals", label: `Shop Approvals (${pendingShops})`, icon: FileText },
             { id: "qr_settings", label: "Nexora QR Settings", icon: QrCode },
-            { id: "qr_payments", label: `QR Payment Verification (${paymentRecords.filter(p => p.status === 'pending').length})`, icon: CheckCircle }
+            { id: "qr_payments", label: `QR Payment Verification (${paymentRecords.filter(p => p.status === 'pending').length})`, icon: CheckCircle },
+            { id: "referral_settings", label: "Referral Settings", icon: Sparkles },
+            { id: "membership_plans", label: "Membership Plans", icon: Award }
           ].map(tab => {
             const Icon = tab.icon;
             return (
@@ -1090,6 +1118,41 @@ export default function SuperAdminDashboard({ navigateTo }: SuperAdminDashboardP
 
             </div>
           </div>
+        )}
+
+        {/* Tab 4: REFERRAL SETTINGS */}
+        {activeTab === "referral_settings" && (
+            <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
+                <h3 className="text-sm font-black uppercase tracking-wider text-slate-400 mb-6">Referral Reward Settings</h3>
+                {referralSettings ? (
+                    <div className="space-y-4">
+                        <p className="text-xs text-slate-500">Min Payment: ₹{referralSettings.min_payment_amount}</p>
+                        <p className="text-xs text-slate-500">Referrer Reward: ₹{referralSettings.referrer_reward_amount}</p>
+                        <p className="text-xs text-slate-500">Referred Reward: ₹{referralSettings.referred_customer_reward_amount}</p>
+                        <p className="text-xs text-slate-500">Active: {referralSettings.is_active ? "Yes" : "No"}</p>
+                    </div>
+                ) : (
+                    <p className="text-sm font-bold text-slate-500">Loading settings...</p>
+                )}
+            </div>
+        )}
+
+        {/* Tab 5: MEMBERSHIP PLANS */}
+        {activeTab === "membership_plans" && (
+            <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
+                <h3 className="text-sm font-black uppercase tracking-wider text-slate-400 mb-6">Membership Plans</h3>
+                <div className="space-y-4">
+                    {membershipPlans.map(plan => (
+                        <div key={plan.id} className="p-4 bg-slate-50 rounded-2xl flex justify-between items-center">
+                            <div>
+                                <p className="font-bold text-slate-900">{plan.name}</p>
+                                <p className="text-xs text-slate-500">Discount: {plan.discount_percent}%</p>
+                            </div>
+                            <button className="text-xs font-bold text-blue-600 bg-white px-3 py-1.5 rounded-lg border border-slate-200">Edit</button>
+                        </div>
+                    ))}
+                </div>
+            </div>
         )}
 
       </main>

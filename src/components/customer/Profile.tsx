@@ -13,6 +13,9 @@ interface ProfileProps {
 const Profile = ({ navigateTo }: ProfileProps) => {
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [rewardData, setRewardData] = useState<any>(null); // Added
+  const [membership, setMembership] = useState<any>(null);
+  const [referralData, setReferralData] = useState<any>(null);
   const [reviewsCount, setReviewsCount] = useState<number>(0);
   const [bookingsCount, setBookingsCount] = useState<number>(0);
   const [completedCount, setCompletedCount] = useState<number>(0);
@@ -34,12 +37,34 @@ const Profile = ({ navigateTo }: ProfileProps) => {
           .single();
         if (data) setProfile(data);
 
-        // Fetch stats in parallel
-        const [favsRes, reviewsRes, bookingsRes] = await Promise.all([
+        // Fetch stats, referral data and membership in parallel
+        const [favsRes, reviewsRes, bookingsRes, rewardRes, refCodeRes, refEventsRes, membershipRes] = await Promise.all([
           supabase.from('customer_favourites').select('shop_id').eq('customer_id', user.id),
           supabase.from('customer_reviews').select('*', { count: 'exact', head: true }).eq('customer_id', user.id),
-          supabase.from('customer_bookings').select('*', { count: 'exact', head: true }).eq('customer_id', user.id)
+          supabase.from('customer_bookings').select('*', { count: 'exact', head: true }).eq('customer_id', user.id),
+          supabase.from('customer_reward_wallets').select('*').eq('customer_id', user.id).maybeSingle(),
+          supabase.rpc("generate_customer_referral_code", { customer_id: user.id }),
+          supabase.from('customer_referral_events').select('*').eq('referrer_id', user.id),
+          supabase.from('customer_memberships').select('*, membership_plans(*)').eq('customer_id', user.id).maybeSingle()
         ]);
+        
+        if (!rewardRes.error && rewardRes.data) {
+          setRewardData(rewardRes.data);
+        }
+        
+        setReferralData({
+            code: refCodeRes.data,
+            events: refEventsRes.data || []
+        });
+        
+        if (membershipRes.data) {
+            setMembership(membershipRes.data);
+        } else {
+            // If missing, ensure it
+            await supabase.rpc("ensure_customer_membership", { customer_id: user.id });
+            const { data } = await supabase.from('customer_memberships').select('*, membership_plans(*)').eq('customer_id', user.id).maybeSingle();
+            setMembership(data);
+        }
         
         if (!favsRes.error && favsRes.data) {
           setDebugInfo(prev => ({ ...prev, favCount: favsRes.data.length }));
@@ -165,21 +190,26 @@ const Profile = ({ navigateTo }: ProfileProps) => {
         </div>
 
         {/* Membership Card */}
-        <div className="bg-gradient-to-br from-indigo-600 to-violet-700 p-6 rounded-3xl text-white shadow-lg">
-            <div className="flex justify-between items-start mb-4">
-                <div>
-                    <p className="text-[10px] opacity-80 font-bold uppercase">Current Level</p>
-                    <p className="font-black text-xl">Gold Member</p>
-                </div>
-                <Award className="w-8 h-8 text-amber-300" />
-            </div>
-            <div className="flex justify-between items-end">
-                <div>
-                    <p className="text-[10px] opacity-80 font-bold">Reward Points</p>
-                    <p className="font-black text-2xl">1,250</p>
-                </div>
-                <button onClick={() => navigateTo("/rewards")} className="px-4 py-2 bg-white/20 rounded-xl text-[10px] font-bold">View Rewards</button>
-            </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-gradient-to-br from-indigo-600 to-violet-700 p-6 rounded-3xl text-white shadow-lg">
+              <div className="flex justify-between items-start mb-4">
+                  <div>
+                      <p className="text-[10px] opacity-80 font-bold uppercase">Current Level</p>
+                      <p className="font-black text-lg">Gold Member</p>
+                  </div>
+                  <Award className="w-6 h-6 text-amber-300" />
+              </div>
+          </div>
+          <div className="bg-gradient-to-br from-emerald-600 to-teal-700 p-6 rounded-3xl text-white shadow-lg">
+              <div className="flex justify-between items-start mb-4">
+                  <div>
+                      <p className="text-[10px] opacity-80 font-bold uppercase">Rewards</p>
+                      <p className="font-black text-lg">₹{rewardData?.balance || 0}</p>
+                  </div>
+                  <Sparkles className="w-6 h-6 text-yellow-300" />
+              </div>
+              <button onClick={() => navigateTo("/rewards")} className="w-full py-2 bg-white/20 rounded-xl text-[10px] font-bold">View Rewards</button>
+          </div>
         </div>
 
         {/* Stats */}
@@ -196,6 +226,54 @@ const Profile = ({ navigateTo }: ProfileProps) => {
                 </div>
             ))}
         </div>
+
+        {/* Membership Card */}
+        {membership && (
+            <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+                <h3 className="font-bold text-slate-900 text-sm">Membership Card</h3>
+                <div className={`p-6 rounded-3xl text-white shadow-lg ${
+                    membership.membership_plans.name === 'Platinum' ? 'bg-gradient-to-br from-slate-700 to-slate-900' :
+                    membership.membership_plans.name === 'Gold' ? 'bg-gradient-to-br from-amber-500 to-amber-700' :
+                    'bg-gradient-to-br from-slate-400 to-slate-600'
+                }`}>
+                    <div className="flex justify-between items-start mb-4">
+                        <div>
+                            <p className="text-[10px] opacity-80 font-bold uppercase">{membership.membership_plans.name} Member</p>
+                            <p className="font-black text-lg">{membership.membership_plans.discount_percent}% Discount</p>
+                        </div>
+                        <Award className="w-6 h-6 text-white/50" />
+                    </div>
+                </div>
+            </div>
+        )}
+        
+        {/* Referral Section */}
+        {referralData && (
+          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+              <h3 className="font-bold text-slate-900 text-sm">Invite Friends</h3>
+              <div className="bg-slate-50 p-4 rounded-2xl flex items-center justify-between">
+                  <p className="text-xs font-bold text-slate-600">Your Code: <span className="text-blue-600">{referralData.code}</span></p>
+                  <button onClick={() => {
+                      navigator.clipboard.writeText(`${window.location.origin}/sign-up?ref=${referralData.code}`);
+                      setLocalMessage("Referral link copied!");
+                  }} className="text-[10px] font-bold bg-white px-3 py-1.5 rounded-lg border border-slate-200">Copy Link</button>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="bg-slate-50 p-3 rounded-2xl">
+                      <p className="text-[10px] font-bold text-slate-400">Total</p>
+                      <p className="font-black text-sm">{referralData.events.length}</p>
+                  </div>
+                  <div className="bg-slate-50 p-3 rounded-2xl">
+                      <p className="text-[10px] font-bold text-slate-400">Pending</p>
+                      <p className="font-black text-sm">{referralData.events.filter((e: any) => e.status === 'pending').length}</p>
+                  </div>
+                  <div className="bg-slate-50 p-3 rounded-2xl">
+                      <p className="text-[10px] font-bold text-slate-400">Rewarded</p>
+                      <p className="font-black text-sm">{referralData.events.filter((e: any) => e.status === 'rewarded').length}</p>
+                  </div>
+              </div>
+          </div>
+        )}
 
         {/* Favourites */}
         <div>

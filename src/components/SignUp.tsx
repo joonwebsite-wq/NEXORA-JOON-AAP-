@@ -36,6 +36,14 @@ export default function SignUp({ navigateTo }: SignUpProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const refCode = params.get("ref");
+    if (refCode) {
+      localStorage.setItem("nexora_pending_referral_code", refCode);
+    }
+  }, []);
+
   const handleInputChange = (setter: React.Dispatch<React.SetStateAction<string>>, value: string) => {
     setErrorMessage(null);
     setSuccessMessage(null);
@@ -112,6 +120,14 @@ export default function SignUp({ navigateTo }: SignUpProps) {
           setErrorMessage(`Signup failed: ${error.message}`);
         }
       } else if (data.user) {
+        const pendingRef = localStorage.getItem("nexora_pending_referral_code");
+        if (pendingRef) {
+            await supabase.rpc("capture_customer_referral", {
+                referred_customer_id: data.user.id,
+                referral_code: pendingRef
+            });
+            localStorage.removeItem("nexora_pending_referral_code");
+        }
         setSuccessMessage("Account created successfully. Please check your email if verification is required.");
         setFullName("");
         setEmail("");

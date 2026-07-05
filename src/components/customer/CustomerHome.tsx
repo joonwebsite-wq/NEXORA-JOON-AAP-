@@ -105,6 +105,8 @@ const isShopMatchKeyword = (
 
 const CustomerHome = ({ navigateTo }: CustomerHomeProps) => {
   const [profile, setProfile] = useState<any>(null);
+  const [rewardData, setRewardData] = useState<any>(null); // Added
+  const [membership, setMembership] = useState<any>(null); // Added
   const [shops, setShops] = useState<Shop[]>([]);
   const [shopServices, setShopServices] = useState<Record<string, { service_name: string; category: string; price: number; duration: number; }[]>>({});
   const [aiRecommendations, setAiRecommendations] = useState<{service_name: string; category: string; price: number; duration: number; count: number}[]>([]);
@@ -160,15 +162,22 @@ const CustomerHome = ({ navigateTo }: CustomerHomeProps) => {
       try {
         const { data: { user } } = await supabase.auth.getUser();
         
-        // 1. Fetch Profile
+        // 1. Fetch Profile, Rewards & Membership
         if (user) {
-          const { data: profileData } = await supabase
-            .from("profiles")
-            .select("full_name, email, phone, city, area, role")
-            .eq("id", user.id)
-            .single();
+          const [profileRes, rewardRes, membershipRes] = await Promise.all([
+            supabase.from("profiles").select("full_name, email, phone, city, area, role").eq("id", user.id).single(),
+            supabase.from("customer_reward_wallets").select('*').eq('customer_id', user.id).maybeSingle(),
+            supabase.from("customer_memberships").select("*, membership_plans(*)").eq("customer_id", user.id).maybeSingle()
+          ]);
           
-          if (profileData) setProfile(profileData);
+          if (profileRes.data) setProfile(profileRes.data);
+          if (rewardRes.data) setRewardData(rewardRes.data);
+          if (membershipRes.data) setMembership(membershipRes.data);
+          else {
+              await supabase.rpc("ensure_customer_membership", { customer_id: user.id });
+              const { data } = await supabase.from('customer_memberships').select('*, membership_plans(*)').eq('customer_id', user.id).maybeSingle();
+              setMembership(data);
+          }
 
           const { data: favData } = await supabase
             .from("customer_favourites")
@@ -655,9 +664,42 @@ const CustomerHome = ({ navigateTo }: CustomerHomeProps) => {
         <section className="p-6">
           <h2 className="text-xl font-bold text-slate-900 mb-1">Hi, {profile?.full_name || "Nexora User"}</h2>
           <p className="text-slate-500 text-sm mb-4">Salon ja rahe ho? Nexora kiya kya?</p>
-          <p className="text-xs text-blue-600 font-bold flex items-center gap-1">
-            <MapPin className="w-3.5 h-3.5" /> {showingNearText}
-          </p>
+          <div className="flex gap-4">
+             <p className="text-xs text-blue-600 font-bold flex items-center gap-1">
+               <MapPin className="w-3.5 h-3.5" /> {showingNearText}
+             </p>
+             <button onClick={() => navigateTo("/profile")} className="text-xs text-emerald-600 font-bold flex items-center gap-1">
+               <Sparkles className="w-3.5 h-3.5" /> Rewards: ₹{rewardData?.balance || 0}
+             </button>
+          </div>
+        </section>
+
+        {/* Referral CTA */}
+        <section className="px-6 mb-6">
+            <div className="grid grid-cols-2 gap-4">
+                {membership && (
+                    <div className="bg-slate-900 p-6 rounded-3xl text-white shadow-lg relative overflow-hidden">
+                        <h3 className="font-bold text-sm mb-1">{membership.membership_plans.name}</h3>
+                        <p className="text-[10px] opacity-90 mb-2">{membership.membership_plans.discount_percent}% Off</p>
+                        <button 
+                          onClick={() => navigateTo("/profile")}
+                          className="bg-white/10 text-white px-3 py-1.5 rounded-xl text-[10px] font-bold"
+                        >
+                            View
+                        </button>
+                    </div>
+                )}
+                <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-6 rounded-3xl text-white shadow-lg relative overflow-hidden">
+                    <h3 className="font-bold text-sm mb-1">Invite Friends</h3>
+                    <p className="text-[10px] opacity-90 mb-2">Earn rewards!</p>
+                    <button 
+                      onClick={() => navigateTo("/profile")}
+                      className="bg-white text-blue-700 px-3 py-1.5 rounded-xl text-[10px] font-black"
+                    >
+                        Invite
+                    </button>
+                </div>
+            </div>
         </section>
 
         {/* Search & Location Selection Container */}

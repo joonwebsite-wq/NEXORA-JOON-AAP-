@@ -27,7 +27,7 @@ export default function OwnerDashboardPlaceholder({ navigateTo }: Props) {
   const [shop, setShop] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [servicesCount, setServicesCount] = useState(0);
-  const [activeTab, setActiveTab] = useState<"overview" | "bookings" | "services" | "reviews" | "website" | "wallet_qr">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "bookings" | "services" | "reviews" | "website" | "wallet_payouts">("overview");
 
   // State for all 6 tabs
   const [bookings, setBookings] = useState<any[]>([]);
@@ -160,17 +160,17 @@ export default function OwnerDashboardPlaceholder({ navigateTo }: Props) {
             console.error("Error loading wallet:", err);
           }
 
-          // 6. Fetch QR Payment Records
+          // 6. Fetch Razorpay Payment Records
           try {
             const { data: paymentsData } = await supabase
-              .from("qr_payment_records")
+              .from("razorpay_payments")
               .select("*")
               .eq("owner_id", user.id)
               .eq("shop_id", shopData.id)
               .order("created_at", { ascending: false });
             if (paymentsData) setPaymentRecords(paymentsData);
           } catch (err) {
-            console.error("Error loading payment records:", err);
+            console.error("Error loading Razorpay payments:", err);
           }
 
           // 7. Fetch Wallet Ledger
@@ -706,20 +706,92 @@ export default function OwnerDashboardPlaceholder({ navigateTo }: Props) {
               <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-2xs space-y-4">
                 <h3 className="text-xs font-black uppercase tracking-wider text-slate-400">Payout Account Settings</h3>
                 <p className="text-4xs text-slate-400">Add your Bank account or UPI ID for automated daily 10 PM payouts.</p>
-                {/* Form fields would go here */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <input type="text" placeholder="Account Holder Name" className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-xs" />
+                  <input type="text" placeholder="Account Number" className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-xs" />
+                  <input type="text" placeholder="IFSC" className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-xs" />
+                  <input type="text" placeholder="UPI ID" className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-xs" />
+                </div>
+                <button className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-xl cursor-pointer">Save Account</button>
+              </div>
+
+              {/* Settlement History */}
+              <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-2xs space-y-4">
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-400">Settlement History</h3>
+                 <p className="text-xs text-slate-400">No payout settlements yet.</p>
               </div>
 
               {/* Razorpay Payments History */}
               <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-2xs space-y-4">
                 <h3 className="text-xs font-black uppercase tracking-wider text-slate-400">Razorpay Payment History</h3>
-                {/* List would go here */}
+                {paymentRecords.length === 0 ? (
+                  <p className="text-xs text-slate-400">No payment history yet.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-3xs">
+                      <thead>
+                        <tr className="border-b border-slate-100 text-slate-400 uppercase tracking-wider">
+                          <th className="py-2.5 font-bold">Date</th>
+                          <th className="py-2.5 font-bold">Gross</th>
+                          <th className="py-2.5 font-bold">Nexora 10%</th>
+                          <th className="py-2.5 font-bold">Owner 90%</th>
+                          <th className="py-2.5 font-bold">Method</th>
+                          <th className="py-2.5 font-bold">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-slate-700">
+                        {paymentRecords.map(r => (
+                          <tr key={r.id}>
+                            <td className="py-3">{new Date(r.created_at).toLocaleDateString()}</td>
+                            <td className="py-3">₹{r.amount}</td>
+                            <td className="py-3 text-amber-600">₹{(r.amount * 0.1).toFixed(2)}</td>
+                            <td className="py-3 text-emerald-600 font-bold">₹{(r.amount * 0.9).toFixed(2)}</td>
+                            <td className="py-3 capitalize">{r.method}</td>
+                            <td className="py-3 font-bold uppercase">{r.status}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Wallet Ledger */}
+              <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-2xs space-y-4">
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-400">Wallet Ledger</h3>
+                {ledgerRecords.length === 0 ? (
+                  <p className="text-xs text-slate-400">No ledger records yet.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-3xs">
+                      <thead>
+                        <tr className="border-b border-slate-100 text-slate-400 uppercase tracking-wider">
+                          <th className="py-2.5 font-bold">Date</th>
+                          <th className="py-2.5 font-bold">Type</th>
+                          <th className="py-2.5 font-bold">Source</th>
+                          <th className="py-2.5 font-bold">Amount</th>
+                          <th className="py-2.5 font-bold">Balance</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-slate-700">
+                        {ledgerRecords.map(l => (
+                          <tr key={l.id}>
+                            <td className="py-3">{new Date(l.created_at).toLocaleDateString()}</td>
+                            <td className={`py-3 font-bold uppercase ${l.type === 'credit' ? 'text-emerald-600' : 'text-rose-600'}`}>{l.type}</td>
+                            <td className="py-3 capitalize">{l.source}</td>
+                            <td className={`py-3 font-bold ${l.type === 'credit' ? 'text-emerald-600' : 'text-rose-600'}`}>{l.type === 'credit' ? '+' : '-'}₹{l.amount}</td>
+                            <td className="py-3 font-bold">₹{l.balance_after}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </div>
           )}
+          </div>
         </div>
-
       </div>
-
-    </div>
   );
 }

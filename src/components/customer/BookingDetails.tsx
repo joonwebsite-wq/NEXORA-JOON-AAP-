@@ -55,13 +55,19 @@ const BookingDetails = ({ navigateTo, bookingId }: BookingDetailsProps) => {
   
   // QR Payment & Settings States
   const [isPaying, setIsPaying] = useState(false);
+  const [isBucketAvailable, setIsBucketAvailable] = useState(false); // Added
+  const [rewardBalance, setRewardBalance] = useState(0); // Added
+  const [applyRewards, setApplyRewards] = useState(false); // Added
+  const [membership, setMembership] = useState<any>(null); // Added
 
   // Review state
   const [existingReview, setExistingReview] = useState<CustomerReview | null>(null);
+  const [rewardEntry, setRewardEntry] = useState<any>(null); // Added
   const [showReviewForm, setShowReviewForm] = useState(false);
   const [rating, setRating] = useState(0);
   const [reviewText, setReviewText] = useState("");
   const [submittingReview, setSubmittingReview] = useState(false);
+  const [removingReward, setRemovingReward] = useState(false); // Added
 
   const handleShare = async () => {
     if (!booking || !shop) return;
@@ -120,6 +126,10 @@ const BookingDetails = ({ navigateTo, bookingId }: BookingDetailsProps) => {
       if (bookingError) throw bookingError;
       if (!bookingData) throw new Error("Booking not found");
       setBooking(bookingData);
+      
+      if (bookingData.reward_redeemed_amount && bookingData.reward_redeemed_amount > 0) {
+        setApplyRewards(true);
+      }
 
       // 3. Fetch Related Data in Parallel
       const [shopRes, staffRes, servicesRes, profileRes] = await Promise.all([
@@ -138,15 +148,35 @@ const BookingDetails = ({ navigateTo, bookingId }: BookingDetailsProps) => {
       setServices(servicesRes.data || []);
       setCustomer(profileRes.data);
 
-      // 4. Check for existing review
-      const { data: reviewData } = await supabase
-        .from("customer_reviews")
-        .select("*")
-        .eq("booking_id", bookingId)
-        .eq("customer_id", session.user.id)
-        .maybeSingle();
+      // 4. Check for existing review, reward entry, reward wallet AND membership
+      const [reviewData, rewardData, rewardWallet, membershipData] = await Promise.all([
+        supabase
+          .from("customer_reviews")
+          .select("*")
+          .eq("booking_id", bookingId)
+          .eq("customer_id", session.user.id)
+          .maybeSingle(),
+        supabase
+          .from("customer_reward_ledger")
+          .select("*")
+          .eq("booking_id", bookingId)
+          .maybeSingle(),
+        supabase
+          .from("customer_reward_wallets")
+          .select("balance")
+          .eq("customer_id", session.user.id)
+          .maybeSingle(),
+        supabase
+          .from("customer_memberships")
+          .select("*, membership_plans(*)")
+          .eq("customer_id", session.user.id)
+          .maybeSingle()
+      ]);
       
-      setExistingReview(reviewData);
+      setExistingReview(reviewData.data);
+      setRewardEntry(rewardData.data);
+      setRewardBalance(rewardWallet.data?.balance || 0);
+      setMembership(membershipData.data);
 
       // 5. Test if storage bucket exists
       try {
@@ -240,7 +270,10 @@ const BookingDetails = ({ navigateTo, bookingId }: BookingDetailsProps) => {
             "Content-Type": "application/json",
             "Authorization": `Bearer ${session.access_token}`
         },
-        body: JSON.stringify({ booking_id: booking.id }),
+        body: JSON.stringify({ 
+            booking_id: booking.id,
+            reward_redeemed_amount: applyRewards ? Math.min(rewardBalance, booking.total_amount - 1) : 0
+        }),
       });
       const order = await response.json();
       if (!order.order_id) throw new Error("Failed to create order");
@@ -248,7 +281,7 @@ const BookingDetails = ({ navigateTo, bookingId }: BookingDetailsProps) => {
       // 2. Open checkout
       const options = {
         key: order.key_id,
-        amount: booking.total_amount * 100,
+        amount: (booking.total_amount - (applyRewards ? Math.min(rewardBalance, booking.total_amount - 1) : 0)) * 100,
         currency: "INR",
         name: "Nexora",
         description: "Booking Payment",
@@ -284,6 +317,35 @@ const BookingDetails = ({ navigateTo, bookingId }: BookingDetailsProps) => {
       setMessage({ type: 'error', text: "Payment initiation failed." });
     } finally {
       setIsPaying(false);
+    }
+  };
+
+  const handleRemoveReward = async () => {
+    if (!booking) return;
+    setRemovingReward(true);
+    try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) throw new Error("Unauthorized");
+
+        const response = await fetch("/api/razorpay/remove-reward", {
+            method: "POST",
+            headers: { 
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${session.access_token}`
+            },
+            body: JSON.stringify({ booking_id: booking.id }),
+        });
+        
+        if (!response.ok) throw new Error("Failed to remove reward");
+        
+        setApplyRewards(false);
+        setBooking({ ...booking, reward_redeemed_amount: 0 });
+        setMessage({ type: 'success', text: "Reward removed." });
+    } catch (err) {
+        console.error(err);
+        setMessage({ type: 'error', text: "Failed to remove reward" });
+    } finally {
+        setRemovingReward(false);
     }
   };
 
@@ -335,6 +397,12 @@ const BookingDetails = ({ navigateTo, bookingId }: BookingDetailsProps) => {
       default: return status;
     }
   };
+
+  const membershipDiscount = membership?.membership_plans?.discount_percent || 0;
+  const discountAmount = Math.floor(booking.total_amount * (membershipDiscount / 100));
+  const amountAfterMembership = booking.total_amount - discountAmount;
+  const rewardToRedeem = applyRewards ? Math.min(rewardBalance, amountAfterMembership - 1) : 0;
+  const payableAmount = amountAfterMembership - rewardToRedeem;
 
   return (
     <div className="min-h-screen bg-slate-50 pb-32 font-sans">
@@ -478,47 +546,77 @@ const BookingDetails = ({ navigateTo, bookingId }: BookingDetailsProps) => {
             </div>
             
             <div className="pt-4 border-t border-slate-50 flex justify-between items-center">
-                <p className="text-xs font-bold text-slate-500 uppercase">Total Amount</p>
+                <p className="text-xs font-bold text-slate-500 uppercase">Gross Amount</p>
                 <p className="text-lg font-black text-slate-900">₹{booking.total_amount}</p>
             </div>
+            
+            {membershipDiscount > 0 && (
+                <div className="flex justify-between items-center text-amber-600">
+                    <p className="text-xs font-bold uppercase">{membership.membership_plans.name} ({membershipDiscount}%)</p>
+                    <p className="text-lg font-black">-₹{discountAmount}</p>
+                </div>
+            )}
+            
+            {applyRewards && (
+                <div className="flex justify-between items-center text-emerald-600">
+                    <p className="text-xs font-bold uppercase">Reward Redeemed</p>
+                    <p className="text-lg font-black">-₹{rewardToRedeem}</p>
+                </div>
+            )}
+            
+            <div className="pt-4 border-t border-slate-50 flex justify-between items-center">
+                <p className="text-xs font-bold text-slate-500 uppercase">Payable Amount</p>
+                <p className="text-lg font-black text-slate-900">₹{payableAmount}</p>
+            </div>
         </div>
-
-        {/* Customer Info Card */}
-        {customer && (
-          <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-sm space-y-4">
-              <h4 className="font-bold text-slate-900 text-sm border-b border-slate-50 pb-4">Customer Information</h4>
-              <div className="grid grid-cols-2 gap-4">
-                  <div>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Name</p>
-                      <p className="text-xs font-bold text-slate-900">{customer.full_name || "N/A"}</p>
-                  </div>
-                  <div>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Phone</p>
-                      <p className="text-xs font-bold text-slate-900">{customer.phone || "N/A"}</p>
-                  </div>
-                  <div className="col-span-2">
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Email</p>
-                      <p className="text-xs font-bold text-slate-900">{customer.email || "N/A"}</p>
-                  </div>
-              </div>
-          </div>
-        )}
 
         {/* Payment Section */}
         {(booking.status === 'pending' || booking.status === 'confirmed') && booking.payment_status !== 'paid' && (
             <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-sm space-y-4">
                 <h4 className="font-bold text-slate-900 text-sm">Pay Online</h4>
-                <p className="text-xs text-slate-500">Secure payment via Razorpay. Nexora automatically handles commission and owner payout.</p>
+                
+                {rewardBalance > 0 && booking.payment_status !== 'order_created' && (
+                    <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100 space-y-3">
+                        <div className="flex justify-between items-center">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input 
+                                    type="checkbox" 
+                                    checked={applyRewards} 
+                                    onChange={(e) => setApplyRewards(e.target.checked)} 
+                                    className="w-4 h-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500"
+                                />
+                                <span className="text-xs font-bold text-emerald-900">Apply Reward Balance (₹{rewardBalance})</span>
+                            </label>
+                        </div>
+                    </div>
+                )}
+                
+                {applyRewards && booking.payment_status !== 'order_created' && (
+                    <button onClick={handleRemoveReward} disabled={removingReward} className="text-[10px] text-rose-600 font-bold underline">Remove Applied Reward</button>
+                )}
+
                 <button
-                  className="w-full flex items-center justify-center gap-2 py-4 px-6 bg-blue-600 text-white font-bold rounded-2xl text-sm shadow-xl shadow-blue-100 hover:bg-blue-700 transition"
-                  onClick={handlePayNow}
-                  disabled={isPaying}
+                    className="w-full flex items-center justify-center gap-2 py-4 px-6 bg-blue-600 text-white font-bold rounded-2xl text-sm shadow-xl shadow-blue-100 hover:bg-blue-700 transition"
+                    onClick={handlePayNow}
+                    disabled={isPaying}
                 >
-                    {isPaying ? "Processing..." : "Pay Now"}
+                    {isPaying ? "Processing..." : `Pay ₹${payableAmount}`}
                 </button>
                 {booking.payment_status === 'order_created' && (
                     <p className="text-xs text-amber-600 font-bold text-center">Payment verification in progress.</p>
                 )}
+            </div>
+        )}
+        
+        {rewardEntry && (
+            <div className="bg-emerald-50 rounded-3xl p-6 border border-emerald-100 shadow-sm flex items-center gap-4">
+                <div className="p-3 bg-emerald-100 rounded-full text-emerald-600">
+                    <Sparkles className="w-6 h-6" />
+                </div>
+                <div>
+                    <h4 className="font-bold text-emerald-900 text-sm">Rewards Earned!</h4>
+                    <p className="text-xs text-emerald-700">You earned ₹{rewardEntry.amount} reward points for this booking.</p>
+                </div>
             </div>
         )}
 
@@ -660,3 +758,4 @@ const BookingDetails = ({ navigateTo, bookingId }: BookingDetailsProps) => {
 };
 
 export default BookingDetails;
+
